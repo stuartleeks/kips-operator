@@ -1,3 +1,7 @@
 version: "2"
 domain: faux.ninja
 repo: faux.ninja/kips-operator
+resources:
+- group: kips
+  version: v1alpha1
+  kind: ServiceBridge

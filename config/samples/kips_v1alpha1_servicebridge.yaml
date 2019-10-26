@@ -1,0 +1,7 @@
+apiVersion: kips.faux.ninja/v1alpha1
+kind: ServiceBridge
+metadata:
+  name: servicebridge-sample
+spec:
+  # Add fields here
+  foo: bar
