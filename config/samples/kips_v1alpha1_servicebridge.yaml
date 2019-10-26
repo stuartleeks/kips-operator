@@ -3,5 +3,4 @@ kind: ServiceBridge
 metadata:
   name: servicebridge-sample
 spec:
-  # Add fields here
-  foo: bar
+  targetServiceName: api

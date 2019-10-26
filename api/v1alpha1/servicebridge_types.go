@@ -11,15 +11,21 @@ import (
 type ServiceBridgeSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	TargetServiceName string `json:"targetServiceName"`
 }
 
 // ServiceBridgeStatus defines the observed state of ServiceBridge
 type ServiceBridgeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	Temp string `json:"temp"`
 }
 
 // +kubebuilder:object:root=true
+// The line below is the key to updating the status without hitting "the server could not find the requested resource" - see https://github.com/kubernetes-sigs/kubebuilder/blob/a06ec9adbe2f3f4388399697f4cc30ed35fef2dd/docs/book/src/reference/generating-crd.md#status
+// +kubebuilder:subresource:status
 
 // ServiceBridge is the Schema for the servicebridges API
 type ServiceBridge struct {
