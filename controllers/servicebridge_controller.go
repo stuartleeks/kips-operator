@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -25,6 +26,7 @@ type ServiceBridgeReconciler struct {
 // +kubebuilder:rbac:groups=kips.faux.ninja,resources=servicebridges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kips.faux.ninja,resources=servicebridges/status,verbs=get;update;patch
 // +kubebuilder:rbac:resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:resources=events,verbs=get;list;watch;create
 
 func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
@@ -53,22 +55,37 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	serviceBridge.Status.Temp = fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetServiceName, service.Spec.Selector)
-
 	if err := r.Status().Update(ctx, &serviceBridge); err != nil {
 		log.Error(err, "unable to update ServiceBridge status")
 		return ctrl.Result{}, err
 	}
 
-	// TODO store selectors as JSON on the *Service* rather than go map output on *ServiceBridge*
-	serviceBridge.ObjectMeta.Annotations["OriginalSelectors"] = fmt.Sprintf("%v", service.Spec.Selector)
-	if err := r.Update(ctx, &serviceBridge); err != nil {
-		log.Error(err, "unable to update ServiceBridge metadata")
+	serviceOriginalSelectors := service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"]
+	if serviceOriginalSelectors != "" {
+		// another ServiceBridge is applied
+		serviceBridge.Status.Message = "TargetService already has a ServiceBridge applied"
+		if err := r.Status().Update(ctx, &serviceBridge); err != nil {
+			log.Error(err, "unable to update ServiceBridge status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// store selectors as JSON on the Service
+	originalSelectorsJSON, err := json.Marshal(service.Spec.Selector)
+	if err != nil {
+		log.Error(err, "Failed to convert selectors to JSON")
+		return ctrl.Result{}, err
+	}
+	service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"] = string(originalSelectorsJSON)
+	if err := r.Update(ctx, &service); err != nil {
+		log.Error(err, "unable to update Service metadata")
 		return ctrl.Result{}, err
 	}
 
 	// TODO - modify the Service to add the original selectors and apply new ones (Add a check that the original selectors aren't already set, which would indicate another ServiceBridge is already applied - fail in this case)
 	// TODO - create a config map for the azbridge config
-	// TODO - create a deployment for azbridge 
+	// TODO - create a deployment for azbridge
 
 	return ctrl.Result{}, nil
 }

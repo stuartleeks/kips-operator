@@ -20,7 +20,8 @@ type ServiceBridgeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Temp string `json:"temp"`
+	Message string `json:"message"`
+	Temp    string `json:"temp"`
 }
 
 // +kubebuilder:object:root=true
