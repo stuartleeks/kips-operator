@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -13,7 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	kipsv1alpha1 "faux.ninja/kips-operator/api/v1alpha1"
@@ -46,10 +47,9 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	r.counter++ // do we need atomic increment?
 	log := r.Log.WithValues("servicebridge", req.NamespacedName).WithValues("counter", fmt.Sprintf("%d", r.counter))
 
-	serviceBridge := &kipsv1alpha1.ServiceBridge{}
-
 	log.V(1).Info("starting reconcile")
 
+	serviceBridge := &kipsv1alpha1.ServiceBridge{}
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
 		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
 		return ctrl.Result{}, ignoreNotFound(err)
@@ -60,27 +60,25 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		Namespace: serviceBridge.ObjectMeta.Namespace,
 		Name:      serviceName,
 	}
-
 	service := &corev1.Service{}
-
 	if err := r.Get(ctx, serviceNamespacedName, service); err != nil {
-		// TODO - raise event, log message?
 		log.Error(err, "unable to fetch service")
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceNotFound", fmt.Sprintf("Unable to retrieve service '%s'", serviceName))
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
 	}
 
-	// add a finalizer to revert the selectors on the Service: https://book.kubebuilder.io/reference/using-finalizers.html?highlight=delete#using-finalizers
-	if serviceBridge.ObjectMeta.DeletionTimestamp.IsZero() {
-		if err := r.ensureFinalizerPresent(ctx, log, serviceBridge); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
+	deletionTime := serviceBridge.ObjectMeta.DeletionTimestamp
+	if !deletionTime.IsZero() {
 		// The object is being deleted
 		if err := r.tearDownKipsAndRemoveFinalizer(ctx, log, serviceBridge); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// add a finalizer to revert the selectors on the Service: https://book.kubebuilder.io/reference/using-finalizers.html?highlight=delete#using-finalizers
+	if err := r.ensureFinalizerPresent(ctx, log, serviceBridge); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	result, err := r.updateServiceSelectors(ctx, log, serviceBridge, service)
@@ -91,7 +89,15 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{}, err
 	}
 
-	// TODO - create a config map for the azbridge config
+	// Create a config map for the azbridge config
+	result, err = r.ensureConfigMap(ctx, log, serviceBridge, service)
+	if result != nil {
+		return *result, err
+	}
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// TODO - create a deployment for azbridge
 
 	return ctrl.Result{}, nil
@@ -120,7 +126,15 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 			return err
 		}
 
-		// TODO - delete the config map and deployment
+		// TODO - delete the config map
+		configMap := r.getConfigMap(*serviceBridge)
+		if err := r.Delete(ctx, configMap); err != nil {
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
+			return err
+		}
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
+
+		// TODO - delete the deployment
 
 		// remove our finalizer from the list and update it.
 		log.V(1).Info("Remove ServiceBridge finalizer")
@@ -180,6 +194,40 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 	return nil, nil
 }
 
+func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) (*ctrl.Result, error) {
+
+	desiredConfigMap := r.getConfigMap(*serviceBridge)
+	configMap := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
+		if !apierrs.IsNotFound(err) {
+			return &ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredConfigMap); err != nil {
+			if apierrs.IsAlreadyExists(err) {
+				// requeue and reprocess as cache is stale
+				log.V(1).Info("Creating config map failed - already exists. Requeuing")
+				return &ctrl.Result{Requeue: true}, nil
+			}
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create config map: %s", err))
+			log.Error(err, "Failed to create configMap")
+			return &ctrl.Result{}, nil
+		}
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapCreated", "Created ConfigMap")
+	} else {
+		if !reflect.DeepEqual(configMap.Data, desiredConfigMap.Data) {
+			configMap.Data = desiredConfigMap.Data
+			if err := r.Update(ctx, configMap); err != nil {
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapUpdateFailed", fmt.Sprintf("Failed to update config map: %s", err))
+				log.Error(err, "Failed to update configMap")
+				return &ctrl.Result{}, nil
+			}
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
+		}
+	}
+
+	return nil, nil
+}
+
 func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge) error {
 
 	serviceName := serviceBridge.Spec.TargetServiceName
@@ -219,6 +267,22 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
 
 	return nil
+}
+
+func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: serviceBridge.Namespace,
+			Name:      serviceBridge.Name,
+		},
+		Data: map[string]string{
+			"config.yaml": `LocalForward:
+	- RelayName: api
+		BindAddress: 0.0.0.0
+		BindPort: 80
+		PortName: http`,
+		},
+	}
 }
 
 func ignoreNotFound(err error) error {
