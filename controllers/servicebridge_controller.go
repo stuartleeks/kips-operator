@@ -35,7 +35,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	serviceBridge := kipsv1alpha1.ServiceBridge{}
 
 	if err := r.Get(ctx, req.NamespacedName, &serviceBridge); err != nil {
-		log.Error(err, "unable to fetch ServiceBridge")
+		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted")
 		return ctrl.Result{}, ignoreNotFound(err)
 	}
 
