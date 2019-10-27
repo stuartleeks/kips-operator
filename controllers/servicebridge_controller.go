@@ -24,8 +24,10 @@ type ServiceBridgeReconciler struct {
 	counter int
 }
 
-var (
-	finalizerName string = "servicebridge.finalizers.kips.faux.ninja"
+const (
+	finalizerName                      string = "servicebridge.finalizers.kips.faux.ninja"
+	annotationServiceOriginalSelectors string = "faux.ninja/kips-original-selectors"
+	annotationServiceServiceBridge     string = "faux.ninja/kips-servicebridge"
 )
 
 // +kubebuilder:rbac:groups=kips.faux.ninja,resources=servicebridges,verbs=get;list;watch;create;update;patch;delete
@@ -44,7 +46,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	log.V(1).Info("starting reconcile")
 
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
-		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted")
+		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
 		return ctrl.Result{}, ignoreNotFound(err)
 	}
 
@@ -126,7 +128,7 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 
 func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) (*ctrl.Result, error) {
 
-	serviceAppliedBridge := service.ObjectMeta.Annotations["faux.ninja/kips-servicebridge"]
+	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 	if serviceAppliedBridge != "" {
 		if serviceAppliedBridge != serviceBridge.Name {
 			return &ctrl.Result{}, fmt.Errorf("Service does not match the current ServiceBridge name")
@@ -144,7 +146,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		}
 	}
 
-	serviceOriginalSelectors := service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"]
+	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
 	if serviceOriginalSelectors != "" {
 		// another ServiceBridge is applied
 		serviceBridge.Status.Message = "TargetService already has a ServiceBridge applied"
@@ -161,8 +163,8 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		log.Error(err, "Failed to convert selectors to JSON")
 		return &ctrl.Result{}, err
 	}
-	service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"] = string(originalSelectorsJSON)
-	service.ObjectMeta.Annotations["faux.ninja/kips-servicebridge"] = serviceBridge.Name // Check this when reverting in finalizer
+	service.ObjectMeta.Annotations[annotationServiceOriginalSelectors] = string(originalSelectorsJSON)
+	service.ObjectMeta.Annotations[annotationServiceServiceBridge] = serviceBridge.Name // Check this when reverting in finalizer
 	service.Spec.Selector = map[string]string{
 		"service-bridge": serviceBridge.Name,
 	}
@@ -196,8 +198,8 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 		return err
 	}
 
-	serviceOriginalSelectors := service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"]
-	serviceAppliedBridge := service.ObjectMeta.Annotations["faux.ninja/kips-servicebridge"]
+	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
+	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 
 	if serviceAppliedBridge != serviceBridge.Name {
 		return fmt.Errorf("Service does not match the current ServiceBridge name")
@@ -209,8 +211,8 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	}
 
 	service.Spec.Selector = originalSelectors
-	delete(service.ObjectMeta.Annotations, "faux.ninja/kips-original-selectors")
-	delete(service.ObjectMeta.Annotations, "faux.ninja/kips-servicebridge")
+	delete(service.ObjectMeta.Annotations, annotationServiceOriginalSelectors)
+	delete(service.ObjectMeta.Annotations, annotationServiceServiceBridge)
 	log.V(1).Info("Remove Service metadata", "Service.ObjectMeta.ResourceVersion", service.ObjectMeta.ResourceVersion)
 	if err := r.Update(ctx, service); err != nil {
 		log.Error(err, "unable to update Service metadata")
