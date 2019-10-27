@@ -4,24 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-
 	corev1 "k8s.io/api/core/v1"
 
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
 	kipsv1alpha1 "faux.ninja/kips-operator/api/v1alpha1"
+
+	"k8s.io/client-go/tools/record"
 )
 
 // ServiceBridgeReconciler reconciles a ServiceBridge object
 type ServiceBridgeReconciler struct {
 	client.Client
-	Log     logr.Logger
-	counter int
+	Log              logr.Logger
+	counter          int
+	eventBroadcaster record.EventRecorder
 }
 
 const (
@@ -61,7 +66,8 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	if err := r.Get(ctx, serviceNamespacedName, service); err != nil {
 		// TODO - raise event, log message?
 		log.Error(err, "unable to fetch service")
-		return ctrl.Result{}, err
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceNotFound", fmt.Sprintf("Unable to retrieve service '%s'", serviceName))
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
 	}
 
 	// add a finalizer to revert the selectors on the Service: https://book.kubebuilder.io/reference/using-finalizers.html?highlight=delete#using-finalizers
@@ -131,6 +137,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 	if serviceAppliedBridge != "" {
 		if serviceAppliedBridge != serviceBridge.Name {
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceAlreadyAttached", fmt.Sprintf("Service '%s' already attached to ServiceBridge '%s'", service.Name, serviceAppliedBridge))
 			return &ctrl.Result{}, fmt.Errorf("Service does not match the current ServiceBridge name")
 		}
 		return nil, nil // have already applied the service selector changes
@@ -144,17 +151,6 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 			log.Error(err, "unable to update ServiceBridge status")
 			return &ctrl.Result{}, err
 		}
-	}
-
-	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
-	if serviceOriginalSelectors != "" {
-		// another ServiceBridge is applied
-		serviceBridge.Status.Message = "TargetService already has a ServiceBridge applied"
-		if err := r.Status().Update(ctx, serviceBridge); err != nil {
-			log.Error(err, "unable to update ServiceBridge status")
-			return &ctrl.Result{}, err
-		}
-		return &ctrl.Result{}, nil
 	}
 
 	// store selectors as JSON on the Service
@@ -179,6 +175,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		return &ctrl.Result{}, err
 	}
 	log.V(1).Info("Updated Service metadata", "Service.ObjectMeta.ResourceVersion", service.ObjectMeta.ResourceVersion)
+	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataUpdated", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
 
 	return nil, nil
 }
@@ -202,6 +199,7 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 
 	if serviceAppliedBridge != serviceBridge.Name {
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge ('%s')", service.Name, serviceBridge.Name))
 		return fmt.Errorf("Service does not match the current ServiceBridge name")
 	}
 
@@ -218,6 +216,7 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 		log.Error(err, "unable to update Service metadata")
 		return err
 	}
+	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
 
 	return nil
 }
@@ -236,6 +235,7 @@ func ignoreConflict(err error) error {
 }
 
 func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.eventBroadcaster = mgr.GetEventRecorderFor("kips-operator")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
 		Complete(r)
