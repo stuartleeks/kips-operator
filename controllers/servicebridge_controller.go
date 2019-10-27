@@ -110,10 +110,13 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		return true, nil // have already applied the service selector changes
 	}
 
-	serviceBridge.Status.Temp = fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetServiceName, service.Spec.Selector)
-	if err := r.Status().Update(ctx, &serviceBridge); err != nil {
-		log.Error(err, "unable to update ServiceBridge status")
-		return false, err
+	newStatusTemp := fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetServiceName, service.Spec.Selector)
+	if newStatusTemp != serviceBridge.Status.Temp {
+		serviceBridge.Status.Temp = newStatusTemp
+		if err := r.Status().Update(ctx, &serviceBridge); err != nil {
+			log.Error(err, "unable to update ServiceBridge status")
+			return false, err
+		}
 	}
 
 	serviceOriginalSelectors := service.ObjectMeta.Annotations["faux.ninja/kips-original-selectors"]
