@@ -11,9 +11,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -70,7 +72,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	deletionTime := serviceBridge.ObjectMeta.DeletionTimestamp
 	if !deletionTime.IsZero() {
 		// The object is being deleted
-		if err := r.tearDownKipsAndRemoveFinalizer(ctx, log, serviceBridge); err != nil {
+		if err := r.tearDownKipsAndRemoveFinalizer(ctx, log, serviceBridge, service); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -98,7 +100,14 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{}, err
 	}
 
-	// TODO - create a deployment for azbridge
+	// create a deployment for azbridge
+	result, err = r.ensureDeployment(ctx, log, serviceBridge, service)
+	if result != nil {
+		return *result, err
+	}
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -116,25 +125,33 @@ func (r *ServiceBridgeReconciler) ensureFinalizerPresent(ctx context.Context, lo
 	}
 	return nil
 }
-func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge) error {
+func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) error {
 	if containsString(serviceBridge.ObjectMeta.Finalizers, finalizerName) {
 
 		// our finalizer is present, so lets handle any external dependency
-		if err := r.revertServiceSelectors(ctx, log, serviceBridge); err != nil {
-			// if fail to delete the external dependency here, return with error
-			// so that it can be retried
-			return err
-		}
 
-		// TODO - delete the config map
-		configMap := r.getConfigMap(*serviceBridge)
+		// delete the config map
+		configMap := r.getConfigMap(*serviceBridge, *service)
 		if err := r.Delete(ctx, configMap); err != nil {
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
 			return err
 		}
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
 
-		// TODO - delete the deployment
+		// delete the deployment
+		deployment := r.getDeployment(*serviceBridge, *service)
+		if err := r.Delete(ctx, deployment); err != nil {
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
+			return err
+		}
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleted", "Deleted Deployment")
+
+		// revert service info once other resources are cleaned up
+		if err := r.revertServiceSelectors(ctx, log, serviceBridge); err != nil {
+			// if fail to delete the external dependency here, return with error
+			// so that it can be retried
+			return err
+		}
 
 		// remove our finalizer from the list and update it.
 		log.V(1).Info("Remove ServiceBridge finalizer")
@@ -196,7 +213,9 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 
 func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) (*ctrl.Result, error) {
 
-	desiredConfigMap := r.getConfigMap(*serviceBridge)
+	// TODO - set owner reference?
+
+	desiredConfigMap := r.getConfigMap(*serviceBridge, *service)
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
 		if !apierrs.IsNotFound(err) {
@@ -222,6 +241,42 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 				return &ctrl.Result{}, nil
 			}
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) (*ctrl.Result, error) {
+
+	// TODO - set owner reference?
+
+	desiredDeployment := r.getDeployment(*serviceBridge, *service)
+	deployment := &appsv1.Deployment{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredDeployment.Namespace, Name: desiredDeployment.Name}, deployment); err != nil {
+		if !apierrs.IsNotFound(err) {
+			return &ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredDeployment); err != nil {
+			if apierrs.IsAlreadyExists(err) {
+				// requeue and reprocess as cache is stale
+				log.V(1).Info("Creating deployment - already exists. Requeuing")
+				return &ctrl.Result{Requeue: true}, nil
+			}
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentCreateFailed", fmt.Sprintf("Failed to create deployment: %s", err))
+			log.Error(err, "Failed to create deployment")
+			return &ctrl.Result{}, nil
+		}
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentCreated", "Created Deployment")
+	} else {
+		if !reflect.DeepEqual(deployment.Spec, desiredDeployment.Spec) { // TODO - check if this needs refining
+			deployment.Spec = desiredDeployment.Spec
+			if err := r.Update(ctx, deployment); err != nil {
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentUpdateFailed", fmt.Sprintf("Failed to update deployment: %s", err))
+				log.Error(err, "Failed to update configMap")
+				return &ctrl.Result{}, nil
+			}
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdated", "Updated Deployment")
 		}
 	}
 
@@ -269,18 +324,106 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	return nil
 }
 
-func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge) *corev1.ConfigMap {
+func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: serviceBridge.Namespace,
 			Name:      serviceBridge.Name,
 		},
-		Data: map[string]string{
+		Data: map[string]string{ // TODO - generate this from the service ports!
 			"config.yaml": `LocalForward:
-	- RelayName: api
-		BindAddress: 0.0.0.0
-		BindPort: 80
-		PortName: http`,
+  - RelayName: api
+    BindAddress: 0.0.0.0
+    BindPort: 80
+    PortName: http
+`,
+		},
+	}
+}
+
+func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *appsv1.Deployment {
+	kipsName := serviceBridge.Name + "-kips"
+	replicaCount := int32(1)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: serviceBridge.Namespace,
+			Name:      kipsName,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicaCount,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kipsDeployment": kipsName},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: serviceBridge.Namespace,
+					Name:      kipsName,
+					Labels: map[string]string{
+						"kipsDeployment": kipsName,
+						"serviceBridge":  service.Name},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            "kips",
+							Image:           "slk8stestcontainerpxctv.azurecr.io/azbridge:latest", // TODO - make this configurable
+							ImagePullPolicy: corev1.PullAlways,
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceMemory: resource.MustParse("128Mi"),
+									corev1.ResourceCPU:    resource.MustParse("500m"),
+								},
+							},
+							Command: []string{"sh"},
+							Args:    []string{"-C", "/azbridge-script/start-azbridge.sh"},
+							Env: []corev1.EnvVar{
+								{
+									Name: "AZURE_BRIDGE_CONNECTIONSTRING",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "azbridge-connection-string"},
+											Key:                  "connectionString",
+										},
+									},
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 80,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "azbridge-config",
+									MountPath: "/azbridge-config",
+								},
+								{
+									Name:      "azbridge-script",
+									MountPath: "/azbridge-script",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "azbridge-config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: serviceBridge.Name},
+								},
+							},
+						},
+						{
+							Name: "azbridge-script",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "azbridge-script"},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 }
