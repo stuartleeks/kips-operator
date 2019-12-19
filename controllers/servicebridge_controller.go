@@ -348,20 +348,14 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 			"  - RelayName: api\n" +
 			"    BindAddress: 0.0.0.0\n" +
 			"    BindPort: " + portString + "\n" +
-			"    PortName: http\n"
-			// "    PortName: port" + portString + "\n"
+			"    PortName: port" + portString + "\n"
 
-			// TODO - allow HostPort(s) to be set in ServiceBridge spec
-		// 		localConfigData += `
-		//   - RelayName: api
-		//     HostPort: 5000
-		//     Host: localhost
-		//     PortName: port` + portString + "\n"
+		// TODO - allow HostPort(s) to be set in ServiceBridge spec
 		localConfigData += `
   - RelayName: api
     HostPort: 5000
     Host: localhost
-    PortName: http` + "\n"
+    PortName: port` + portString + "\n"
 	}
 
 	return &corev1.ConfigMap{
