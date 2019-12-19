@@ -32,10 +32,31 @@ spec:
         spec:
           description: ServiceBridgeSpec defines the desired state of ServiceBridge
           properties:
-            targetServiceName:
-              type: string
+            targetService:
+              description: TargetService represents a service targetted by the ServiceBridge
+              properties:
+                name:
+                  type: string
+                ports:
+                  items:
+                    description: TargetServicePort holds the configuration for a targetted
+                      port on a service
+                    properties:
+                      localPort:
+                        type: integer
+                      name:
+                        type: string
+                    required:
+                    - localPort
+                    - name
+                    type: object
+                  type: array
+              required:
+              - name
+              - ports
+              type: object
           required:
-          - targetServiceName
+          - targetService
           type: object
         status:
           description: ServiceBridgeStatus defines the observed state of ServiceBridge

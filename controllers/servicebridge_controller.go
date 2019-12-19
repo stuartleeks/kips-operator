@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	kipsv1alpha1 "faux.ninja/kips-operator/api/v1alpha1"
+	utils "faux.ninja/kips-operator/utils"
 
 	"k8s.io/client-go/tools/record"
 )
@@ -54,10 +55,10 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	serviceBridge := &kipsv1alpha1.ServiceBridge{}
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
 		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
-		return ctrl.Result{}, ignoreNotFound(err)
+		return ctrl.Result{}, utils.IgnoreNotFound(err)
 	}
 
-	serviceName := serviceBridge.Spec.TargetServiceName
+	serviceName := serviceBridge.Spec.TargetService.Name
 	serviceNamespacedName := types.NamespacedName{
 		Namespace: serviceBridge.ObjectMeta.Namespace,
 		Name:      serviceName,
@@ -69,8 +70,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
 	}
 
-	deletionTime := serviceBridge.ObjectMeta.DeletionTimestamp
-	if !deletionTime.IsZero() {
+	if r.isBeingDeleted(serviceBridge) {
 		// The object is being deleted
 		if err := r.tearDownKipsAndRemoveFinalizer(ctx, log, serviceBridge, service); err != nil {
 			return ctrl.Result{}, err
@@ -116,7 +116,7 @@ func (r *ServiceBridgeReconciler) ensureFinalizerPresent(ctx context.Context, lo
 	// The object is not being deleted, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object. This is equivalent
 	// registering our finalizer.
-	if !containsString(serviceBridge.ObjectMeta.Finalizers, finalizerName) {
+	if !utils.ContainsString(serviceBridge.ObjectMeta.Finalizers, finalizerName) {
 		log.V(1).Info("Adding ServiceBridge finalizer")
 		serviceBridge.ObjectMeta.Finalizers = append(serviceBridge.ObjectMeta.Finalizers, finalizerName)
 		if err := r.Update(ctx, serviceBridge); err != nil {
@@ -126,12 +126,12 @@ func (r *ServiceBridgeReconciler) ensureFinalizerPresent(ctx context.Context, lo
 	return nil
 }
 func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) error {
-	if containsString(serviceBridge.ObjectMeta.Finalizers, finalizerName) {
+	if utils.ContainsString(serviceBridge.ObjectMeta.Finalizers, finalizerName) {
 
 		// our finalizer is present, so lets handle any external dependency
 
 		// delete the config map
-		configMap, _ := r.getConfigMap(*serviceBridge, *service)
+		configMap, _, _ := r.getConfigMap(*serviceBridge, *service)
 		if err := r.Delete(ctx, configMap); err != nil {
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
 			return err
@@ -155,7 +155,7 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 
 		// remove our finalizer from the list and update it.
 		log.V(1).Info("Remove ServiceBridge finalizer")
-		serviceBridge.ObjectMeta.Finalizers = removeString(serviceBridge.ObjectMeta.Finalizers, finalizerName)
+		serviceBridge.ObjectMeta.Finalizers = utils.RemoveString(serviceBridge.ObjectMeta.Finalizers, finalizerName)
 		if err := r.Update(context.Background(), serviceBridge); err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		return nil, nil // have already applied the service selector changes
 	}
 
-	newStatusTemp := fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetServiceName, service.Spec.Selector)
+	newStatusTemp := fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetService.Name, service.Spec.Selector)
 	if newStatusTemp != serviceBridge.Status.Temp {
 		log.V(1).Info("Update ServiceBridge status (Temp)")
 		serviceBridge.Status.Temp = newStatusTemp
@@ -211,11 +211,55 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 	return nil, nil
 }
 
+func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge) error {
+
+	serviceName := serviceBridge.Spec.TargetService.Name
+	serviceNamespacedName := types.NamespacedName{
+		Namespace: serviceBridge.ObjectMeta.Namespace,
+		Name:      serviceName,
+	}
+
+	service := &corev1.Service{}
+
+	if err := r.Get(ctx, serviceNamespacedName, service); err != nil {
+		log.Error(err, "unable to fetch service")
+		return err
+	}
+
+	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
+	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
+
+	if serviceAppliedBridge != serviceBridge.Name {
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge ('%s')", service.Name, serviceBridge.Name))
+		return fmt.Errorf("Service does not match the current ServiceBridge name")
+	}
+
+	originalSelectors := map[string]string{}
+	if err := json.Unmarshal([]byte(serviceOriginalSelectors), &originalSelectors); err != nil {
+		return err
+	}
+
+	service.Spec.Selector = originalSelectors
+	delete(service.ObjectMeta.Annotations, annotationServiceOriginalSelectors)
+	delete(service.ObjectMeta.Annotations, annotationServiceServiceBridge)
+	log.V(1).Info("Remove Service metadata", "Service.ObjectMeta.ResourceVersion", service.ObjectMeta.ResourceVersion)
+	if err := r.Update(ctx, service); err != nil {
+		log.Error(err, "unable to update Service metadata")
+		return err
+	}
+	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
+
+	return nil
+}
+
 func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, service *corev1.Service) (*ctrl.Result, error) {
 
 	// TODO - set owner reference?
 
-	desiredConfigMap, clientAzbridgeConfig := r.getConfigMap(*serviceBridge, *service)
+	desiredConfigMap, clientAzbridgeConfig, err := r.getConfigMap(*serviceBridge, *service)
+	if err != nil {
+		return &ctrl.Result{}, err
+	}
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
 		if !apierrs.IsNotFound(err) {
@@ -293,54 +337,25 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 	return nil, nil
 }
 
-func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge) error {
-
-	serviceName := serviceBridge.Spec.TargetServiceName
-	serviceNamespacedName := types.NamespacedName{
-		Namespace: serviceBridge.ObjectMeta.Namespace,
-		Name:      serviceName,
-	}
-
-	service := &corev1.Service{}
-
-	if err := r.Get(ctx, serviceNamespacedName, service); err != nil {
-		log.Error(err, "unable to fetch service")
-		return err
-	}
-
-	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
-	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
-
-	if serviceAppliedBridge != serviceBridge.Name {
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge ('%s')", service.Name, serviceBridge.Name))
-		return fmt.Errorf("Service does not match the current ServiceBridge name")
-	}
-
-	originalSelectors := map[string]string{}
-	if err := json.Unmarshal([]byte(serviceOriginalSelectors), &originalSelectors); err != nil {
-		return err
-	}
-
-	service.Spec.Selector = originalSelectors
-	delete(service.ObjectMeta.Annotations, annotationServiceOriginalSelectors)
-	delete(service.ObjectMeta.Annotations, annotationServiceServiceBridge)
-	log.V(1).Info("Remove Service metadata", "Service.ObjectMeta.ResourceVersion", service.ObjectMeta.ResourceVersion)
-	if err := r.Update(ctx, service); err != nil {
-		log.Error(err, "unable to update Service metadata")
-		return err
-	}
-	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
-
-	return nil
-}
-
-func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string) {
+func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string, error) {
 	clusterConfigData := "LocalForward:"
 	localConfigData := "RemoteForward:"
 
-	for _, servicePort := range service.Spec.Ports {
+	for _, targetPort := range serviceBridge.Spec.TargetService.TargetServicePorts {
+
+		var servicePort *corev1.ServicePort
+		for _, p := range service.Spec.Ports {
+			if p.Name == targetPort.Name {
+				servicePort = &p
+				break
+			}
+		}
+		if servicePort == nil {
+			// TODO Raise error on service bridge
+			return nil, "", fmt.Errorf("Unable to find port '%s' on Service", targetPort.Name)
+		}
+
 		port := servicePort.TargetPort.IntValue() // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
-		// port := servicePort.Port // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
 		portString := fmt.Sprintf("%d", port)
 		// TODO - test multiple ports bound to single relay name
 		// TODO - allow relay name(s) to be set in ServiceBridge spec
@@ -353,7 +368,7 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 		// TODO - allow HostPort(s) to be set in ServiceBridge spec
 		localConfigData += "\n" +
 			"  - RelayName: " + service.Name + "\n" +
-			"    HostPort: 5000\n" +
+			"    HostPort: " + fmt.Sprintf("%d", targetPort.LocalPort) + "\n" +
 			"    Host: localhost\n" +
 			"    PortName: port" + portString + "\n"
 	}
@@ -366,7 +381,7 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 		Data: map[string]string{
 			"config.yaml": clusterConfigData,
 		},
-	}, localConfigData
+	}, localConfigData, nil
 }
 
 func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *appsv1.Deployment {
@@ -456,17 +471,9 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 	}
 }
 
-func ignoreNotFound(err error) error {
-	if apierrs.IsNotFound(err) {
-		return nil
-	}
-	return err
-}
-func ignoreConflict(err error) error {
-	if apierrs.IsConflict(err) {
-		return nil
-	}
-	return err
+func (r *ServiceBridgeReconciler) isBeingDeleted(serviceBridge *kipsv1alpha1.ServiceBridge) bool {
+	deletionTime := serviceBridge.ObjectMeta.DeletionTimestamp
+	return !deletionTime.IsZero()
 }
 
 func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -474,24 +481,4 @@ func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
 		Complete(r)
-}
-
-// Helper functions to check and remove string from a slice of strings.
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(slice []string, s string) (result []string) {
-	for _, item := range slice {
-		if item == s {
-			continue
-		}
-		result = append(result, item)
-	}
-	return
 }
