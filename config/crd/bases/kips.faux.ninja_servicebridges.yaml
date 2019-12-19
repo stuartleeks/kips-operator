@@ -40,11 +40,14 @@ spec:
         status:
           description: ServiceBridgeStatus defines the observed state of ServiceBridge
           properties:
+            clientAzbridgeConfig:
+              type: string
             message:
               type: string
             temp:
               type: string
           required:
+          - clientAzbridgeConfig
           - message
           - temp
           type: object

@@ -131,7 +131,7 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 		// our finalizer is present, so lets handle any external dependency
 
 		// delete the config map
-		configMap := r.getConfigMap(*serviceBridge, *service)
+		configMap, _ := r.getConfigMap(*serviceBridge, *service)
 		if err := r.Delete(ctx, configMap); err != nil {
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
 			return err
@@ -215,7 +215,7 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 
 	// TODO - set owner reference?
 
-	desiredConfigMap := r.getConfigMap(*serviceBridge, *service)
+	desiredConfigMap, clientAzbridgeConfig := r.getConfigMap(*serviceBridge, *service)
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
 		if !apierrs.IsNotFound(err) {
@@ -238,10 +238,20 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 			if err := r.Update(ctx, configMap); err != nil {
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapUpdateFailed", fmt.Sprintf("Failed to update config map: %s", err))
 				log.Error(err, "Failed to update configMap")
-				return &ctrl.Result{}, nil
+				return &ctrl.Result{}, err
 			}
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
 		}
+	}
+
+	if serviceBridge.Status.ClientAzbridgeConfig != clientAzbridgeConfig {
+		serviceBridge.Status.ClientAzbridgeConfig = clientAzbridgeConfig
+		if err := r.Status().Update(ctx, serviceBridge); err != nil {
+			log.Error(err, "Failed to update ServiceBridge.Status.ClientAzbridgeConfig")
+			return &ctrl.Result{}, err
+		}
+		log.V(1).Info("Updated ServiceBridge.Status.ClientAzbridgeConfig")
+
 	}
 
 	return nil, nil
@@ -274,7 +284,7 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 			if err := r.Update(ctx, deployment); err != nil {
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentUpdateFailed", fmt.Sprintf("Failed to update deployment: %s", err))
 				log.Error(err, "Failed to update configMap")
-				return &ctrl.Result{}, nil
+				return &ctrl.Result{}, err
 			}
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdated", "Updated Deployment")
 		}
@@ -324,21 +334,45 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	return nil
 }
 
-func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *corev1.ConfigMap {
+func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string) {
+	clusterConfigData := "LocalForward:"
+	localConfigData := "RemoteForward:"
+
+	for _, servicePort := range service.Spec.Ports {
+		port := servicePort.TargetPort.IntValue() // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
+		// port := servicePort.Port // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
+		portString := fmt.Sprintf("%d", port)
+		// TODO - test multiple ports bound to single relay name
+		// TODO - allow relay name(s) to be set in ServiceBridge spec
+		clusterConfigData += "\n" +
+			"  - RelayName: api\n" +
+			"    BindAddress: 0.0.0.0\n" +
+			"    BindPort: " + portString + "\n" +
+			"    PortName: http\n"
+			// "    PortName: port" + portString + "\n"
+
+			// TODO - allow HostPort(s) to be set in ServiceBridge spec
+		// 		localConfigData += `
+		//   - RelayName: api
+		//     HostPort: 5000
+		//     Host: localhost
+		//     PortName: port` + portString + "\n"
+		localConfigData += `
+  - RelayName: api
+    HostPort: 5000
+    Host: localhost
+    PortName: http` + "\n"
+	}
+
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: serviceBridge.Namespace,
 			Name:      serviceBridge.Name,
 		},
-		Data: map[string]string{ // TODO - generate this from the service ports!
-			"config.yaml": `LocalForward:
-  - RelayName: api
-    BindAddress: 0.0.0.0
-    BindPort: 80
-    PortName: http
-`,
+		Data: map[string]string{
+			"config.yaml": clusterConfigData,
 		},
-	}
+	}, localConfigData
 }
 
 func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *appsv1.Deployment {
@@ -360,13 +394,13 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 					Name:      kipsName,
 					Labels: map[string]string{
 						"kipsDeployment": kipsName,
-						"serviceBridge":  service.Name},
+						"service-bridge": serviceBridge.Name},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
 							Name:            "kips",
-							Image:           "slk8stestcontainerpxctv.azurecr.io/azbridge:latest", // TODO - make this configurable
+							Image:           "slk8stest2.azurecr.io/azbridge:latest", // TODO - make this configurable
 							ImagePullPolicy: corev1.PullAlways,
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
