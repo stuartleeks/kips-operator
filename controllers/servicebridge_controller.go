@@ -143,8 +143,10 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 		// delete the deployment
 		deployment := r.getDeployment(*serviceBridge, *service)
 		if err := r.Delete(ctx, deployment); err != nil {
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
-			return err
+			if !apierrs.IsNotFound(err) { // ignore not found - we wanted to delete it anyway!
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
+				return err
+			}
 		}
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleted", "Deleted Deployment")
 
@@ -171,7 +173,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 	if serviceAppliedBridge != "" {
 		if serviceAppliedBridge != serviceBridge.Name {
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceAlreadyAttached", fmt.Sprintf("Service '%s' already attached to ServiceBridge '%s'", service.Name, serviceAppliedBridge))
-			return &ctrl.Result{}, fmt.Errorf("Service does not match the current ServiceBridge name")
+			return &ctrl.Result{}, nil
 		}
 		return nil, nil // have already applied the service selector changes
 	}
@@ -231,8 +233,12 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
 	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 
+	if serviceAppliedBridge == "" && serviceOriginalSelectors == "" {
+		return nil // we didn't apply the selectors
+	}
 	if serviceAppliedBridge != serviceBridge.Name {
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge ('%s')", service.Name, serviceBridge.Name))
+		// TODO - need to think about this. Should we just skip this step if the selectors don't match? Are we deleting a servicebridge that failed because a service already had another bridge attached?
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge (expected '%s', got '%s')", service.Name, serviceBridge.Name, serviceAppliedBridge))
 		return fmt.Errorf("Service does not match the current ServiceBridge name")
 	}
 
@@ -260,7 +266,9 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 
 	desiredConfigMap, clientAzbridgeConfig, err := r.getConfigMap(*serviceBridge, *service)
 	if err != nil {
-		return &ctrl.Result{}, err
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
+		log.Error(err, "Failed to create desired configMap")
+		return &ctrl.Result{}, nil // don't pass the error as we don't want to requeue
 	}
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
@@ -339,6 +347,7 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 	return nil, nil
 }
 
+// getConfigMap returns the ConfigMap for the service bridge, the azbridge local config, and an error
 func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string, error) {
 	clusterConfigData := "LocalForward:"
 	localConfigData := "RemoteForward:"
@@ -354,7 +363,7 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 		}
 		if servicePort == nil {
 			// TODO Raise error on service bridge
-			return nil, "", fmt.Errorf("Unable to find port '%s' on Service", targetPort.Name)
+			return nil, "", fmt.Errorf("Unable to find port '%s' on Service '%s'", targetPort.Name, service.Name)
 		}
 
 		port := servicePort.TargetPort.IntValue() // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
