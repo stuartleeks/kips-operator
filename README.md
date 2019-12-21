@@ -103,4 +103,4 @@ TODO
   * grab config from servicebridge status
   * run azbridge
   * clean up host names?
-  
+* Add status column to service bridge output (kubectl get) - useful to prompt to describe the object to check events
