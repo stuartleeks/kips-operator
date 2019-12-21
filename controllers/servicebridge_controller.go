@@ -131,12 +131,14 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 		// our finalizer is present, so lets handle any external dependency
 
 		// delete the config map
-		configMap, _, _ := r.getConfigMap(*serviceBridge, *service)
-		if err := r.Delete(ctx, configMap); err != nil {
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
-			return err
+		configMap, _, err := r.getConfigMap(*serviceBridge, *service)
+		if err == nil {
+			if err := r.Delete(ctx, configMap); err != nil {
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
+				return err
+			}
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
 		}
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
 
 		// delete the deployment
 		deployment := r.getDeployment(*serviceBridge, *service)
