@@ -368,7 +368,7 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 		// TODO - allow HostPort(s) to be set in ServiceBridge spec
 		localConfigData += "\n" +
 			"  - RelayName: " + service.Name + "\n" +
-			"    HostPort: " + fmt.Sprintf("%d", targetPort.LocalPort) + "\n" +
+			"    HostPort: " + fmt.Sprintf("%d", targetPort.RemotePort) + "\n" +
 			"    Host: localhost\n" +
 			"    PortName: port" + portString + "\n"
 	}

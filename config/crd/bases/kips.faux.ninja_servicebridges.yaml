@@ -42,13 +42,13 @@ spec:
                     description: TargetServicePort holds the configuration for a targetted
                       port on a service
                     properties:
-                      localPort:
-                        type: integer
                       name:
                         type: string
+                      remotePort:
+                        type: integer
                     required:
-                    - localPort
                     - name
+                    - remotePort
                     type: object
                   type: array
               required:
