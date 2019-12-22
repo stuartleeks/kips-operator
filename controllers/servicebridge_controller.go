@@ -402,7 +402,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 	}, localConfigData, nil
 }
 
-func (r * ServiceBridgeReconciler) getServicePortByName(ports []corev1.ServicePort, portName string) *corev1.ServicePort {
+func (r *ServiceBridgeReconciler) getServicePortByName(ports []corev1.ServicePort, portName string) *corev1.ServicePort {
 	for _, p := range ports {
 		if p.Name == portName {
 			return &p
@@ -503,6 +503,7 @@ func (r *ServiceBridgeReconciler) isBeingDeleted(serviceBridge *kipsv1alpha1.Ser
 	return !deletionTime.IsZero()
 }
 
+// SetupWithManager sets up the controller
 func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.eventBroadcaster = mgr.GetEventRecorderFor("kips-operator")
 	return ctrl.NewControllerManagedBy(mgr).

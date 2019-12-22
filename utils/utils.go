@@ -30,7 +30,7 @@ func ContainsString(slice []string, s string) bool {
 	return false
 }
 
-// RemoveString returns a new slice with the specifed string removed
+// RemoveString returns a new slice with the specified string removed
 func RemoveString(slice []string, s string) (result []string) {
 	for _, item := range slice {
 		if item == s {

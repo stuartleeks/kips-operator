@@ -14,18 +14,18 @@ endif
 all: manager
 
 # Run tests
-test: generate fmt vet manifests
+test: generate fmt checks manifests
 	go test ./... -coverprofile cover.out
 
 # Build manager binary
-manager: generate fmt vet
+manager: generate fmt checks
 	go build -o bin/manager main.go
 
 # Run against the configured Kubernetes cluster in ~/.kube/config
-run: generate fmt vet manifests
+run: generate fmt checks manifests
 	go run ./main.go
 
-debug: generate fmt vet manifests
+debug: generate fmt checks manifests
 	dlv debug ./main.go --headless --listen localhost:2345 --api-version 2
 
 # Install CRDs into a cluster
@@ -45,9 +45,9 @@ manifests: controller-gen
 fmt:
 	go fmt ./...
 
-# Run go vet against code
-vet:
-	go vet ./...
+
+checks:
+	GO111MODULE=on golangci-lint run
 
 # Generate code
 generate: controller-gen
@@ -70,3 +70,4 @@ CONTROLLER_GEN=$(GOBIN)/controller-gen
 else
 CONTROLLER_GEN=$(shell which controller-gen)
 endif
+

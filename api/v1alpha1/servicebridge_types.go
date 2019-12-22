@@ -16,15 +16,15 @@ type ServiceBridgeSpec struct {
 	AdditionalServices []AdditionalService `json:"additionalServices"`
 }
 
-// TargetService represents a service targetted by the ServiceBridge
+// TargetService represents a service targeted by the ServiceBridge
 type TargetService struct {
 	Name  string              `json:"name"`
 	Ports []TargetServicePort `json:"ports"`
 }
 
-// TargetServicePort holds the configuration for a targetted port on a service
+// TargetServicePort holds the configuration for a targeted port on a service
 type TargetServicePort struct {
-	Name       string `json:"name"`       // Name of the targetted port
+	Name       string `json:"name"`       // Name of the targeted port
 	RemotePort int    `json:"remotePort"` // Remote port to forward to
 }
 
@@ -36,7 +36,7 @@ type AdditionalService struct {
 
 // AdditionalServicePort holds the configuration for a port on an AdditionalService
 type AdditionalServicePort struct {
-	Name       string `json:"name"`       // Name of the targetted port
+	Name       string `json:"name"`       // Name of the targeted port
 	RemotePort int    `json:"remotePort"` // Port to use on the remote machine to route traffic to this service
 }
 
