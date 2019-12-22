@@ -5,7 +5,7 @@ import (
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialised.
 
 // ServiceBridgeSpec defines the desired state of ServiceBridge
 type ServiceBridgeSpec struct {
@@ -38,6 +38,7 @@ type AdditionalService struct {
 type AdditionalServicePort struct {
 	Name       string `json:"name"`       // Name of the targeted port
 	RemotePort int    `json:"remotePort"` // Port to use on the remote machine to route traffic to this service
+	// TODO - allow referencing additional services across namespaces
 }
 
 // ServiceBridgeStatus defines the observed state of ServiceBridge

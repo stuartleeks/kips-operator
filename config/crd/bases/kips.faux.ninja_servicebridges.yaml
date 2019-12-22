@@ -59,13 +59,13 @@ spec:
                 type: object
               type: array
             targetService:
-              description: TargetService represents a service targetted by the ServiceBridge
+              description: TargetService represents a service targeted by the ServiceBridge
               properties:
                 name:
                   type: string
                 ports:
                   items:
-                    description: TargetServicePort holds the configuration for a targetted
+                    description: TargetServicePort holds the configuration for a targeted
                       port on a service
                     properties:
                       name:
