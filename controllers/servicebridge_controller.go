@@ -131,12 +131,19 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 		// our finalizer is present, so lets handle any external dependency
 
 		// delete the config map
-		configMap, _, err := r.getConfigMap(*serviceBridge, *service)
-		if err == nil {
-			if err := r.Delete(ctx, configMap); err != nil {
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: serviceBridge.Namespace,
+				Name:      serviceBridge.Name,
+			},
+		}
+
+		if err := r.Delete(ctx, configMap); err != nil {
+			if !apierrs.IsNotFound(err) { // ignore not found - we wanted to delete it anyway!
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
 				return err
 			}
+		} else {
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
 		}
 
@@ -147,8 +154,9 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
 				return err
 			}
+		} else {
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleted", "Deleted Deployment")
 		}
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleted", "Deleted Deployment")
 
 		// revert service info once other resources are cleaned up
 		if err := r.revertServiceSelectors(ctx, log, serviceBridge); err != nil {
@@ -264,7 +272,7 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 
 	// TODO - set owner reference?
 
-	desiredConfigMap, clientAzbridgeConfig, err := r.getConfigMap(*serviceBridge, *service)
+	desiredConfigMap, clientAzbridgeConfig, err := r.getAzBridgeConfig(*serviceBridge, *service)
 	if err != nil {
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
 		log.Error(err, "Failed to create desired configMap")
@@ -347,20 +355,15 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 	return nil, nil
 }
 
-// getConfigMap returns the ConfigMap for the service bridge, the azbridge local config, and an error
-func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string, error) {
+// getAzBridgeConfig returns the ConfigMap for the service bridge, the azbridge local config, and an error
+func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) (*corev1.ConfigMap, string, error) {
+
+	// TargetService - LocalForward for in-cluster deployment, RemoteForward for remote client
 	clusterConfigData := "LocalForward:"
 	localConfigData := "RemoteForward:"
 
-	for _, targetPort := range serviceBridge.Spec.TargetService.TargetServicePorts {
-
-		var servicePort *corev1.ServicePort
-		for _, p := range service.Spec.Ports {
-			if p.Name == targetPort.Name {
-				servicePort = &p
-				break
-			}
-		}
+	for _, targetPort := range serviceBridge.Spec.TargetService.Ports {
+		servicePort := r.getServicePortByName(service.Spec.Ports, targetPort.Name)
 		if servicePort == nil {
 			// TODO Raise error on service bridge
 			return nil, "", fmt.Errorf("Unable to find port '%s' on Service '%s'", targetPort.Name, service.Name)
@@ -383,6 +386,10 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 			"    Host: localhost\n" +
 			"    PortName: port" + portString + "\n"
 	}
+	// if len(serviceBridge.Spec.AdditionalServices) > 0 {
+	// 	// TODO - generate config
+	// 	for _, additionalService := range serviceBridge.Spec.AdditionalServices
+	// }
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -393,6 +400,15 @@ func (r *ServiceBridgeReconciler) getConfigMap(serviceBridge kipsv1alpha1.Servic
 			"config.yaml": clusterConfigData,
 		},
 	}, localConfigData, nil
+}
+
+func (r * ServiceBridgeReconciler) getServicePortByName(ports []corev1.ServicePort, portName string) *corev1.ServicePort {
+	for _, p := range ports {
+		if p.Name == portName {
+			return &p
+		}
+	}
+	return nil
 }
 
 func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge, service corev1.Service) *appsv1.Deployment {

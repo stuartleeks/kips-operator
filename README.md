@@ -90,6 +90,7 @@ TODO
 
 ## TODO
 
+* set up devcontainer
 * Docs
   * installation
   * example of using (e.g. how to achieve each of the examples in the goals)

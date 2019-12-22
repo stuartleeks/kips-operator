@@ -12,19 +12,32 @@ type ServiceBridgeSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	TargetService TargetService `json:"targetService"`
+	TargetService      TargetService       `json:"targetService"`
+	AdditionalServices []AdditionalService `json:"additionalServices"`
 }
 
 // TargetService represents a service targetted by the ServiceBridge
 type TargetService struct {
-	Name               string              `json:"name"`
-	TargetServicePorts []TargetServicePort `json:"ports"`
+	Name  string              `json:"name"`
+	Ports []TargetServicePort `json:"ports"`
 }
 
 // TargetServicePort holds the configuration for a targetted port on a service
 type TargetServicePort struct {
 	Name       string `json:"name"`       // Name of the targetted port
 	RemotePort int    `json:"remotePort"` // Remote port to forward to
+}
+
+// AdditionalService holds the configuration for services that we want the remote machine to be able to forward to
+type AdditionalService struct {
+	Name  string                  `json:"name"`
+	Ports []AdditionalServicePort `json:"ports"`
+}
+
+// AdditionalServicePort holds the configuration for a port on an AdditionalService
+type AdditionalServicePort struct {
+	Name       string `json:"name"`       // Name of the targetted port
+	RemotePort int    `json:"remotePort"` // Port to use on the remote machine to route traffic to this service
 }
 
 // ServiceBridgeStatus defines the observed state of ServiceBridge

@@ -32,6 +32,32 @@ spec:
         spec:
           description: ServiceBridgeSpec defines the desired state of ServiceBridge
           properties:
+            additionalServices:
+              items:
+                description: AdditionalService holds the configuration for services
+                  that we want the remote machine to be able to forward to
+                properties:
+                  name:
+                    type: string
+                  ports:
+                    items:
+                      description: AdditionalServicePort holds the configuration for
+                        a port on an AdditionalService
+                      properties:
+                        name:
+                          type: string
+                        remotePort:
+                          type: integer
+                      required:
+                      - name
+                      - remotePort
+                      type: object
+                    type: array
+                required:
+                - name
+                - ports
+                type: object
+              type: array
             targetService:
               description: TargetService represents a service targetted by the ServiceBridge
               properties:
@@ -56,6 +82,7 @@ spec:
               - ports
               type: object
           required:
+          - additionalServices
           - targetService
           type: object
         status:
