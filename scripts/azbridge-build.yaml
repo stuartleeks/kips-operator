@@ -1,0 +1,7 @@
+version: v1.0.0
+steps:
+- build: -t {{.Run.Registry}}/azbridge:{{.Run.ID}} -f Dockerfile https://github.com/stuartleeks/azure-relay-bridge.git
+- cmd: docker tag {{.Run.Registry}}/azbridge:{{.Run.ID}} {{.Run.Registry}}/azbridge:latest
+- push:
+  - {{.Run.Registry}}/azbridge:{{.Run.ID}}
+  - {{.Run.Registry}}/azbridge:latest
