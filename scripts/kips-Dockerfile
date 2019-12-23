@@ -1,0 +1,5 @@
+FROM azbridge
+
+COPY scripts/start-azbridge.sh /azbridge-script/start-azbridge.sh
+
+ENTRYPOINT ["sh", "-C", "/azbridge-script/start-azbridge.sh"]
