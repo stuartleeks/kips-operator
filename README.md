@@ -84,8 +84,6 @@ In the first goal traffic was only routed from the cluster to a remote machine (
 
 TODO
 
-* building azbridge image
-* building operator image
 * deploying operator (CRDs, operator, config/secrets)
 
 ## TODO
@@ -94,14 +92,11 @@ TODO
 * Docs
   * installation
   * example of using (e.g. how to achieve each of the examples in the goals)
-* installation/config
-  * Need to be able to configure the image for azbridge when deploying the operator
-  * Need to be able to configure the image for the operator when deploying
 * Test multiple ports for a service
-* Implement two-way redirection
 * Script/util for running local side
-  * set up host names?
+  * set up host names? (add hostnames to the status to read from client?)
   * grab config from servicebridge status
   * run azbridge
   * clean up host names?
 * Add status column to service bridge output (kubectl get) - useful to prompt to describe the object to check events
+* Allow additionalServices to reference across namespaces
