@@ -516,7 +516,7 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 					Containers: []corev1.Container{
 						{
 							Name:            "kips",
-							Image:           "slk8stest2.azurecr.io/azbridge:latest", // TODO - make this configurable
+							Image:           "stuartleeks/kips:latest",
 							ImagePullPolicy: corev1.PullAlways,
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
@@ -524,8 +524,6 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 									corev1.ResourceCPU:    resource.MustParse("500m"),
 								},
 							},
-							Command: []string{"sh"},
-							Args:    []string{"-C", "/azbridge-script/start-azbridge.sh"},
 							Env: []corev1.EnvVar{
 								{
 									Name: "AZURE_BRIDGE_CONNECTIONSTRING",
@@ -547,10 +545,6 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 									Name:      "azbridge-config",
 									MountPath: "/azbridge-config",
 								},
-								{
-									Name:      "azbridge-script",
-									MountPath: "/azbridge-script",
-								},
 							},
 						},
 					},
@@ -560,14 +554,6 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 							VolumeSource: corev1.VolumeSource{
 								ConfigMap: &corev1.ConfigMapVolumeSource{
 									LocalObjectReference: corev1.LocalObjectReference{Name: serviceBridge.Name},
-								},
-							},
-						},
-						{
-							Name: "azbridge-script",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "azbridge-script"},
 								},
 							},
 						},
