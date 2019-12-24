@@ -5,7 +5,7 @@ secrets:
     - id: password
       keyvault: https://kipsvault.vault.azure.net/secrets/Password
 steps:
-- build: -t {{.Run.Registry}}/kips:{{.Run.ID}} -f scripts/kips-Dockerfile .
+- build: -t {{.Run.Registry}}/kips:{{.Run.ID}} -f scripts/kips-Dockerfile . --build-arg REPO={{.Run.Registry}}
 - cmd: docker login --username '{{.Secrets.username}}' --password '{{.Secrets.password}}'
 - cmd: docker tag {{.Run.Registry}}/kips:{{.Run.ID}} stuartleeks/kips:{{.Run.ID}}
 - cmd: docker tag {{.Run.Registry}}/kips:{{.Run.ID}} stuartleeks/kips:latest

@@ -1,4 +1,5 @@
-FROM azbridge
+ARG REPO=
+FROM ${REPO}/azbridge
 
 COPY scripts/start-azbridge.sh /azbridge-script/start-azbridge.sh
 
