@@ -1,0 +1,14 @@
+version: v1.0.0
+secrets:
+    - id: username
+      keyvault: https://kipsvault.vault.azure.net/secrets/UserName
+    - id: password
+      keyvault: https://kipsvault.vault.azure.net/secrets/Password
+steps:
+- build: -t {{.Run.Registry}}/kips-sample-api:{{.Run.ID}} -f samples/kips-sample-app/api/Dockerfile samples/kips-sample-app/api
+- cmd: docker login --username '{{.Secrets.username}}' --password '{{.Secrets.password}}'
+- cmd: docker tag {{.Run.Registry}}/kips-sample-api:{{.Run.ID}} stuartleeks/kips-sample-api:{{.Run.ID}}
+- cmd: docker tag {{.Run.Registry}}/kips-sample-api:{{.Run.ID}} stuartleeks/kips-sample-api:latest
+- push:
+  - stuartleeks/kips-sample-api:{{.Run.ID}}
+  - stuartleeks/kips-sample-api:latest
