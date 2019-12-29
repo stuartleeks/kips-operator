@@ -90,13 +90,17 @@ TODO
 
 * set up devcontainer
 * Docs
-  * installation
-  * example of using (e.g. how to achieve each of the examples in the goals)
+  * installation of operator
+  * client setup
+  * walkthrough with kips-sample-app (i.e. how to achieve each of the examples in the goals)
 * Test multiple ports for a service
 * Script/util for running local side
   * set up host names? (add hostnames to the status to read from client?)
-  * grab config from servicebridge status
-  * run azbridge
+  * handle namespace as an arg
+  * dump out info
+  * ~~grab config from servicebridge status~~
+  * ~~run azbridge~~
   * clean up host names?
 * Add status column to service bridge output (kubectl get) - useful to prompt to describe the object to check events
 * Allow additionalServices to reference across namespaces
+* Ensure that updates to the servicebridge are reflected (e.g. change to remote ports)
