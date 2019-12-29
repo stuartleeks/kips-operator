@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 )
@@ -15,13 +16,17 @@ func main() {
 	fmt.Printf("Using API_VALUE=%s\n", apiValue)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Serving response: ApiValue=%s\n", apiValue)
 		fmt.Fprintf(w, apiValue)
 	})
 
 	address := os.Getenv("SERVE_ADDRESS")
 	if address == "" {
-		address = ":8080"
+		address = ":9000"
 	}
 	fmt.Printf("Starting server on '%s' ...\n", address)
-	http.ListenAndServe(address, nil)
+	err := http.ListenAndServe(address, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
 }

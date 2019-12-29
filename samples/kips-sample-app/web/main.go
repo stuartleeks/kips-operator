@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 )
@@ -39,10 +40,13 @@ func main() {
 
 	address := os.Getenv("SERVE_ADDRESS")
 	if address == "" {
-		address = ":8080"
+		address = ":9001"
 	}
 	fmt.Printf("Starting server on '%s' ...\n", address)
-	http.ListenAndServe(address, nil)
+	err := http.ListenAndServe(address, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func serveRoot(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +54,7 @@ func serveRoot(w http.ResponseWriter, r *http.Request) {
 		WebValue: webValue,
 		APIValue: getAPIValue(),
 	}
+	log.Printf("Serving response: WebValue=%s;ApiValue=%s\n", context.WebValue, context.APIValue)
 	rootTemplate.Execute(w, context)
 }
 
