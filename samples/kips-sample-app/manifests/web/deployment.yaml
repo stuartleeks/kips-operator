@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: stuartleeks/kips-sample-web:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        env:
+        - name: API_ADDRESS
+          value: http://api:8080
+        - name: WEB_VALUE
+          value: in-cluster
+        - name: SERVE_ADDRESS
+          value: 0.0.0.0:80
+        ports:
+        - containerPort: 80

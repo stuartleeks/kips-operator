@@ -7,5 +7,5 @@ spec:
     name: api
     ports:
     - name: api
-      remotePort: 5000
-  
+      remotePort:  9000
+  additionalServices: []

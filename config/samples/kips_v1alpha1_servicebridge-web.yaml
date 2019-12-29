@@ -7,10 +7,10 @@ spec:
     name: web
     ports:
     - name: http
-      remotePort: 5000
+      remotePort: 9001
   additionalServices: # These are services that we want the remote machine to be able to forward to
     - name: api
       ports:
         - name: api
-          remotePort: 8081
+          remotePort: 9000
   
