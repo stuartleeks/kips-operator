@@ -5,7 +5,7 @@ import (
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialised.
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // ServiceBridgeSpec defines the desired state of ServiceBridge
 type ServiceBridgeSpec struct {
@@ -46,16 +46,30 @@ type ServiceBridgeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Message              string `json:"message"`
-	Temp                 string `json:"temp"`
-	ClientAzbridgeConfig string `json:"clientAzbridgeConfig"`
+	State                ServiceBridgeState `json:"state"`
+	Message              string             `json:"message"`
+	Temp                 string             `json:"temp"`
+	ClientAzbridgeConfig string             `json:"clientAzbridgeConfig"`
 }
+
+// ServiceBridgeState represents the state of the ServiceBridge
+type ServiceBridgeState string
+
+const (
+	// ServiceBridgeStatePending indicates that the service bridge is being initialized
+	ServiceBridgeStatePending ServiceBridgeState = "Pending"
+	// ServiceBridgeStateReady indicates that the service bridge is ready to connect to from the client
+	ServiceBridgeStateReady ServiceBridgeState = "Ready"
+	// ServiceBridgeStateError indicates that an error has occurred - check the events for more details
+	ServiceBridgeStateError ServiceBridgeState = "Error"
+)
 
 // +kubebuilder:object:root=true
 // The line below is the key to updating the status without hitting "the server could not find the requested resource" - see https://github.com/kubernetes-sigs/kubebuilder/blob/a06ec9adbe2f3f4388399697f4cc30ed35fef2dd/docs/book/src/reference/generating-crd.md#status
 // +kubebuilder:subresource:status
 
 // ServiceBridge is the Schema for the servicebridges API
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 type ServiceBridge struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

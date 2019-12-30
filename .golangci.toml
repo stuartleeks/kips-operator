@@ -18,7 +18,7 @@
     min-occurrences = 3.0
 
   [linters-settings.misspell]
-    locale = "UK"
+    locale = "US"
     ignore-words = ["listend", "analyses"]
 
 [linters]

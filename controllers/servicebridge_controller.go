@@ -84,6 +84,11 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
 	}
 
+	if err := r.setState(ctx, serviceBridge, kipsv1alpha1.ServiceBridgeStatePending); err != nil {
+		log.Error(err, "unable to update ServiceBridge status")
+		return ctrl.Result{}, err
+	}
+
 	// Create a config map for the azbridge config
 	result, err := r.ensureConfigMap(ctx, log, serviceBridge, referencedServices)
 	if result != nil {
@@ -109,6 +114,11 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return *result, err
 	}
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.setState(ctx, serviceBridge, kipsv1alpha1.ServiceBridgeStateReady); err != nil { // TODO - check pod ready state before setting this
+		log.Error(err, "unable to update ServiceBridge status")
 		return ctrl.Result{}, err
 	}
 
@@ -463,7 +473,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 				// TODO - allow relay name(s) to be set in ServiceBridge spec
 				remoteConfigData += "\n" +
 					"  - RelayName: " + service.Name + "\n" +
-					"    BindAddress: localhost\n" + // TODO - do we need to be able to customise this?
+					"    BindAddress: localhost\n" + // TODO - do we need to be able to customize this?
 					"    BindPort: " + fmt.Sprintf("%d", targetPort.RemotePort) + "\n" +
 					"    HostName: " + service.Name + "\n" +
 					"    PortName: port" + portString + "\n"
@@ -567,6 +577,15 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 func (r *ServiceBridgeReconciler) isBeingDeleted(serviceBridge *kipsv1alpha1.ServiceBridge) bool {
 	deletionTime := serviceBridge.ObjectMeta.DeletionTimestamp
 	return !deletionTime.IsZero()
+}
+
+func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, newState kipsv1alpha1.ServiceBridgeState) error {
+	if newState != serviceBridge.Status.State {
+		newBridge := serviceBridge.DeepCopy()
+		newBridge.Status.State = newState
+		return r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge))
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller

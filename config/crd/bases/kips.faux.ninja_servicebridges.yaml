@@ -6,6 +6,10 @@ metadata:
   creationTimestamp: null
   name: servicebridges.kips.faux.ninja
 spec:
+  additionalPrinterColumns:
+  - JSONPath: .status.state
+    name: State
+    type: string
   group: kips.faux.ninja
   names:
     kind: ServiceBridge
@@ -92,11 +96,15 @@ spec:
               type: string
             message:
               type: string
+            state:
+              description: ServiceBridgeState represents the state of the ServiceBridge
+              type: string
             temp:
               type: string
           required:
           - clientAzbridgeConfig
           - message
+          - state
           - temp
           type: object
       type: object
