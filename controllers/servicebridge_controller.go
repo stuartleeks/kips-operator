@@ -1,6 +1,23 @@
+/*
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package controllers
 
 import (
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,6 +52,7 @@ type ReferencedServices struct {
 type ServiceBridgeReconciler struct {
 	client.Client
 	Log              logr.Logger
+	Scheme           *runtime.Scheme
 	counter          int
 	eventBroadcaster record.EventRecorder
 }
@@ -53,6 +71,7 @@ const (
 // Reconcile loop
 func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
+
 	r.counter++ // do we need atomic increment?
 	log := r.Log.WithValues("servicebridge", req.NamespacedName).WithValues("counter", fmt.Sprintf("%d", r.counter))
 
@@ -84,9 +103,11 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
 	}
 
-	if err := r.setState(ctx, serviceBridge, kipsv1alpha1.ServiceBridgeStatePending); err != nil {
-		log.Error(err, "unable to update ServiceBridge status")
-		return ctrl.Result{}, err
+	if serviceBridge.Status.State == nil {
+		if err := r.setState(ctx, serviceBridge, kipsv1alpha1.ServiceBridgeStatePending); err != nil {
+			log.Error(err, "unable to update ServiceBridge status")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Create a config map for the azbridge config
@@ -147,7 +168,6 @@ func (r *ServiceBridgeReconciler) getReferencedServices(ctx context.Context, ser
 
 	return referencedServices, nil
 }
-
 func (r *ServiceBridgeReconciler) getService(ctx context.Context, name string, namespace string) (*corev1.Service, error) {
 	serviceNamespacedName := types.NamespacedName{
 		Namespace: namespace,
@@ -233,16 +253,6 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 			return &ctrl.Result{}, nil
 		}
 		return nil, nil // have already applied the service selector changes
-	}
-
-	newStatusTemp := fmt.Sprintf("working... %s: %v", serviceBridge.Spec.TargetService.Name, service.Spec.Selector)
-	if newStatusTemp != serviceBridge.Status.Temp {
-		log.V(1).Info("Update ServiceBridge status (Temp)")
-		serviceBridge.Status.Temp = newStatusTemp
-		if err := r.Status().Update(ctx, serviceBridge); err != nil {
-			log.Error(err, "unable to update ServiceBridge status")
-			return &ctrl.Result{}, err
-		}
 	}
 
 	// store selectors as JSON on the Service
@@ -355,8 +365,8 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 		}
 	}
 
-	if serviceBridge.Status.ClientAzbridgeConfig != clientAzbridgeConfig {
-		serviceBridge.Status.ClientAzbridgeConfig = clientAzbridgeConfig
+	if serviceBridge.Status.ClientAzbridgeConfig == nil || *serviceBridge.Status.ClientAzbridgeConfig != clientAzbridgeConfig {
+		serviceBridge.Status.ClientAzbridgeConfig = &clientAzbridgeConfig
 		if err := r.Status().Update(ctx, serviceBridge); err != nil {
 			log.Error(err, "Failed to update ServiceBridge.Status.ClientAzbridgeConfig")
 			return &ctrl.Result{}, err
@@ -580,9 +590,9 @@ func (r *ServiceBridgeReconciler) isBeingDeleted(serviceBridge *kipsv1alpha1.Ser
 }
 
 func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, newState kipsv1alpha1.ServiceBridgeState) error {
-	if newState != serviceBridge.Status.State {
+	if serviceBridge.Status.State == nil || *serviceBridge.Status.State != newState {
 		newBridge := serviceBridge.DeepCopy()
-		newBridge.Status.State = newState
+		newBridge.Status.State = &newState
 		return r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge))
 	}
 	return nil

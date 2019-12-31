@@ -46,10 +46,10 @@ type ServiceBridgeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	State                ServiceBridgeState `json:"state"`
-	Message              string             `json:"message"`
-	Temp                 string             `json:"temp"`
-	ClientAzbridgeConfig string             `json:"clientAzbridgeConfig"`
+	State                *ServiceBridgeState `json:"state,omitempty"`
+	Message              *string             `json:"message,omitempty"`
+	Temp                 *string             `json:"temp,omitempty"`
+	ClientAzbridgeConfig *string             `json:"clientAzbridgeConfig,omitempty"`
 }
 
 // ServiceBridgeState represents the state of the ServiceBridge
