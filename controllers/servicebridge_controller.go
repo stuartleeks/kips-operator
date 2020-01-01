@@ -370,13 +370,13 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 	}
 
 	if serviceBridge.Status.ClientAzbridgeConfig == nil || *serviceBridge.Status.ClientAzbridgeConfig != clientAzbridgeConfig {
-		serviceBridge.Status.ClientAzbridgeConfig = &clientAzbridgeConfig
-		if err := r.Status().Update(ctx, serviceBridge); err != nil {
+		newBridge := serviceBridge.DeepCopy()
+		newBridge.Status.ClientAzbridgeConfig = &clientAzbridgeConfig
+		if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
 			log.Error(err, "Failed to update ServiceBridge.Status.ClientAzbridgeConfig")
 			return &ctrl.Result{}, err
 		}
 		log.V(1).Info("Updated ServiceBridge.Status.ClientAzbridgeConfig")
-
 	}
 
 	return nil, nil
