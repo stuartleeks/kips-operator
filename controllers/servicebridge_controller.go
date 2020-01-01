@@ -79,8 +79,12 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 
 	serviceBridge := &kipsv1alpha1.ServiceBridge{}
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
-		log.Error(err, "unable to fetch ServiceBridge - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
-		return ctrl.Result{}, utils.IgnoreNotFound(err)
+		if apierrs.IsNotFound(err) {
+			log.Info("unable to fetch ServiceBridge (NotFound) - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, "unable to fetch ServiceBridge")
+		return ctrl.Result{}, err
 	}
 
 	if r.isBeingDeleted(serviceBridge) {
