@@ -103,5 +103,4 @@ TODO
   * clean up host names?
 * Add status column to service bridge output (kubectl get) - useful to prompt to describe the object to check events
 * Allow additionalServices to reference across namespaces
-* Ensure that updates to the servicebridge are reflected (e.g. change to remote ports)
 * review error handling (add back-off and retry limit). Also review when errors are returned vs just requeuing (check logs).

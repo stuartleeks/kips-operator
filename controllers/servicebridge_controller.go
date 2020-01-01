@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -41,6 +42,12 @@ import (
 
 	"k8s.io/client-go/tools/record"
 )
+
+type azbridgeConfig struct {
+	ClusterConfigMap  *corev1.ConfigMap
+	ClusterConfigHash string
+	RemoteConfig      string
+}
 
 // ReferencedServices holds the services referenced by a service bridge
 type ReferencedServices struct {
@@ -115,7 +122,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	// Create a config map for the azbridge config
-	result, err := r.ensureConfigMap(ctx, log, serviceBridge, referencedServices)
+	result, configHash, err := r.ensureConfigMap(ctx, log, serviceBridge, referencedServices)
 	if result != nil {
 		return *result, err
 	}
@@ -124,7 +131,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	// create a deployment for azbridge
-	result, err = r.ensureDeployment(ctx, log, serviceBridge)
+	result, err = r.ensureDeployment(ctx, log, serviceBridge, configHash)
 	if result != nil {
 		return *result, err
 	}
@@ -221,7 +228,7 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 		}
 
 		// delete the deployment
-		deployment := r.getDeployment(*serviceBridge)
+		deployment := r.getDeployment(*serviceBridge, "NOT_SET_DELETING")
 		if err := r.Delete(ctx, deployment); err != nil {
 			if !apierrs.IsNotFound(err) { // ignore not found - we wanted to delete it anyway!
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
@@ -331,30 +338,31 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	return nil
 }
 
-func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, referencedServices *ReferencedServices) (*ctrl.Result, error) {
+func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, referencedServices *ReferencedServices) (*ctrl.Result, string, error) {
 
 	// TODO - set owner reference?
 
-	desiredConfigMap, clientAzbridgeConfig, err := r.getAzBridgeConfig(*serviceBridge, referencedServices)
+	config, err := r.getAzBridgeConfig(*serviceBridge, referencedServices)
 	if err != nil {
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
 		log.Error(err, "Failed to create desired configMap")
-		return &ctrl.Result{}, nil // don't pass the error as we don't want to requeue (TODO - revisit and requeue with back-off)
+		return &ctrl.Result{}, "", nil // don't pass the error as we don't want to requeue (TODO - revisit and requeue with back-off)
 	}
+	desiredConfigMap := config.ClusterConfigMap
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
 		if !apierrs.IsNotFound(err) {
-			return &ctrl.Result{}, err
+			return &ctrl.Result{}, "", err
 		}
 		if err := r.Create(ctx, desiredConfigMap); err != nil {
 			if apierrs.IsAlreadyExists(err) {
 				// requeue and reprocess as cache is stale
 				log.V(1).Info("Creating config map failed - already exists. Requeuing")
-				return &ctrl.Result{Requeue: true}, nil
+				return &ctrl.Result{Requeue: true}, "", nil
 			}
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create config map: %s", err))
 			log.Error(err, "Failed to create configMap")
-			return &ctrl.Result{}, nil
+			return &ctrl.Result{}, "", nil
 		}
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapCreated", "Created ConfigMap")
 	} else {
@@ -363,30 +371,31 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 			if err := r.Update(ctx, configMap); err != nil {
 				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapUpdateFailed", fmt.Sprintf("Failed to update config map: %s", err))
 				log.Error(err, "Failed to update configMap")
-				return &ctrl.Result{}, err
+				return &ctrl.Result{}, "", err
 			}
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
 		}
 	}
 
+	clientAzbridgeConfig := config.RemoteConfig
 	if serviceBridge.Status.ClientAzbridgeConfig == nil || *serviceBridge.Status.ClientAzbridgeConfig != clientAzbridgeConfig {
 		newBridge := serviceBridge.DeepCopy()
 		newBridge.Status.ClientAzbridgeConfig = &clientAzbridgeConfig
 		if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
 			log.Error(err, "Failed to update ServiceBridge.Status.ClientAzbridgeConfig")
-			return &ctrl.Result{}, err
+			return &ctrl.Result{}, "", err
 		}
 		log.V(1).Info("Updated ServiceBridge.Status.ClientAzbridgeConfig")
 	}
 
-	return nil, nil
+	return nil, config.ClusterConfigHash, nil
 }
 
-func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge) (*ctrl.Result, error) {
+func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, configHash string) (*ctrl.Result, error) {
 
 	// TODO - set owner reference?
 
-	desiredDeployment := r.getDeployment(*serviceBridge)
+	desiredDeployment := r.getDeployment(*serviceBridge, configHash)
 	deployment := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredDeployment.Namespace, Name: desiredDeployment.Name}, deployment); err != nil {
 		if !apierrs.IsNotFound(err) {
@@ -402,15 +411,26 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 			log.Error(err, "Failed to create deployment")
 			return &ctrl.Result{}, nil
 		}
+		log.Info("Created deployment", "ConfigHash", configHash)
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentCreated", "Created Deployment")
 	} else {
-		if !reflect.DeepEqual(deployment.Spec, desiredDeployment.Spec) { // TODO - check if this needs refining
-			deployment.Spec = desiredDeployment.Spec
-			if err := r.Update(ctx, deployment); err != nil {
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentUpdateFailed", fmt.Sprintf("Failed to update deployment: %s", err))
-				log.Error(err, "Failed to update configMap")
+		// only thing that changes is the CONFIG_HASH value used to trigger updates when the config changes
+		currentHash := r.getConfigHashFor(deployment)
+		desiredHash := r.getConfigHashFor(desiredDeployment)
+		if currentHash != desiredHash {
+			newDeployment := deployment.DeepCopy()
+			if err = r.setConfigHashFor(newDeployment, desiredHash); err != nil {
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update config hash")
+				log.Error(err, "Failed to update config hash")
+				return &ctrl.Result{}, nil
+			}
+			err := r.Patch(ctx, newDeployment, client.MergeFrom(deployment))
+			if err != nil {
+				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update deployment")
+				log.Error(err, "Failed to update deployment")
 				return &ctrl.Result{}, err
 			}
+			log.Info("Updated deployment", "ConfigHash", desiredHash)
 			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdated", "Updated Deployment")
 		}
 	}
@@ -418,8 +438,29 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 	return nil, nil
 }
 
+func (r *ServiceBridgeReconciler) getConfigHashFor(deployment *appsv1.Deployment) string {
+	envVars := deployment.Spec.Template.Spec.Containers[0].Env
+	for _, val := range envVars {
+		if val.Name == "CONFIG_HASH" {
+			return val.Value
+		}
+	}
+	return ""
+}
+func (r *ServiceBridgeReconciler) setConfigHashFor(deployment *appsv1.Deployment, newHash string) error {
+	envVars := deployment.Spec.Template.Spec.Containers[0].Env
+	for index, val := range envVars {
+		if val.Name == "CONFIG_HASH" {
+			val.Value = newHash
+			deployment.Spec.Template.Spec.Containers[0].Env[index] = val
+			return nil
+		}
+	}
+	return fmt.Errorf("Unable to find CONFIG_HASH env var")
+}
+
 // getAzBridgeConfig returns the ConfigMap for the service bridge, the azbridge config for the remote machine, and an error
-func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.ServiceBridge, referencedServices *ReferencedServices) (*corev1.ConfigMap, string, error) {
+func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.ServiceBridge, referencedServices *ReferencedServices) (azbridgeConfig, error) {
 
 	// Config docs: https://github.com/Azure/azure-relay-bridge/blob/master/CONFIG.md#configuration-file
 	// LocalForward is the config for the listener side
@@ -436,7 +477,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 		servicePort := r.getServicePortByName(service.Spec.Ports, targetPort.Name)
 		if servicePort == nil {
 			// TODO Raise error on service bridge
-			return nil, "", fmt.Errorf("Unable to find port '%s' on Target Service '%s'", targetPort.Name, service.Name)
+			return azbridgeConfig{}, fmt.Errorf("Unable to find port '%s' on Target Service '%s'", targetPort.Name, service.Name)
 		}
 
 		port := servicePort.TargetPort.IntValue() // Use TargetPort here as we want to bind to port that traffic is sent to // TODO - need to handle StringValue being set, and looking this up on the ports in the pod
@@ -469,7 +510,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 				servicePort := r.getServicePortByName(service.Spec.Ports, targetPort.Name)
 				if servicePort == nil {
 					// TODO Raise error on service bridge
-					return nil, "", fmt.Errorf("Unable to find port '%s' on Additional Service '%s'", targetPort.Name, service.Name)
+					return azbridgeConfig{}, fmt.Errorf("Unable to find port '%s' on Additional Service '%s'", targetPort.Name, service.Name)
 				}
 
 				port := servicePort.Port // use Port here as we want to direct to the service port
@@ -495,7 +536,14 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 		}
 	}
 
-	return &corev1.ConfigMap{
+	h := sha1.New()
+	_, err := h.Write([]byte(clusterConfigData))
+	if err != nil {
+		return azbridgeConfig{}, fmt.Errorf("Failed to create config hash: %s", err)
+	}
+	hashBytes := h.Sum(nil)
+
+	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: serviceBridge.Namespace,
 			Name:      serviceBridge.Name,
@@ -503,7 +551,12 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 		Data: map[string]string{
 			"config.yaml": clusterConfigData,
 		},
-	}, remoteConfigData, nil
+	}
+	return azbridgeConfig{
+		ClusterConfigMap:  configMap,
+		ClusterConfigHash: fmt.Sprintf("%x", hashBytes),
+		RemoteConfig:      remoteConfigData,
+	}, nil
 }
 
 func (r *ServiceBridgeReconciler) getServicePortByName(ports []corev1.ServicePort, portName string) *corev1.ServicePort {
@@ -515,7 +568,7 @@ func (r *ServiceBridgeReconciler) getServicePortByName(ports []corev1.ServicePor
 	return nil
 }
 
-func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge) *appsv1.Deployment {
+func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.ServiceBridge, configHash string) *appsv1.Deployment {
 	kipsName := serviceBridge.Name + "-kips"
 	replicaCount := int32(1)
 	return &appsv1.Deployment{
@@ -557,6 +610,10 @@ func (r *ServiceBridgeReconciler) getDeployment(serviceBridge kipsv1alpha1.Servi
 											Key:                  "connectionString",
 										},
 									},
+								},
+								{
+									Name:  "CONFIG_HASH",
+									Value: configHash, // Use config hash here to cause a change to the pod spec when the config data changes
 								},
 							},
 							Ports: []corev1.ContainerPort{
