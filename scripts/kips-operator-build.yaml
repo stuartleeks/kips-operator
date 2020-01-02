@@ -1,0 +1,14 @@
+version: v1.0.0
+secrets:
+    - id: username
+      keyvault: https://kipsvault.vault.azure.net/secrets/UserName
+    - id: password
+      keyvault: https://kipsvault.vault.azure.net/secrets/Password
+steps:
+- build: -t {{.Run.Registry}}/kips-operator:{{.Run.ID}} -f Dockerfile . --build-arg REPO={{.Run.Registry}}
+- cmd: docker login --username '{{.Secrets.username}}' --password '{{.Secrets.password}}'
+- cmd: docker tag {{.Run.Registry}}/kips-operator:{{.Run.ID}} stuartleeks/kips-operator:{{.Run.ID}}
+- cmd: docker tag {{.Run.Registry}}/kips-operator:{{.Run.ID}} stuartleeks/kips-operator:latest
+- push:
+  - stuartleeks/kips-operator:{{.Run.ID}}
+  - stuartleeks/kips-operator:latest
