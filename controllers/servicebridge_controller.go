@@ -278,8 +278,14 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 	service := &corev1.Service{}
 
 	if err := r.Get(ctx, serviceNamespacedName, service); err != nil {
-		log.Error(err, "unable to fetch service")
-		return err
+		if apierrs.IsNotFound(err) {
+			// Target Service not found.
+			// Could be that it didn't exist on creation and ServiceBridge is being deleted
+			// Could be that it has been deleted and now the ServiceBridge is also being deleted
+			log.Info("Unable to fetch targetService - skipping")
+			return nil
+		}
+		return fmt.Errorf("Failed to retrieve service: %s", err)
 	}
 
 	serviceOriginalSelectors := service.ObjectMeta.Annotations[annotationServiceOriginalSelectors]
@@ -289,9 +295,8 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 		return nil // we didn't apply the selectors
 	}
 	if serviceAppliedBridge != serviceBridge.Name {
-		// TODO - need to think about this. Should we just skip this step if the selectors don't match? Are we deleting a servicebridge that failed because a service already had another bridge attached?
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceMetadataMismatch", fmt.Sprintf("Metadata for service '%s' doesn't match current ServiceBridge (expected '%s', got '%s')", service.Name, serviceBridge.Name, serviceAppliedBridge))
-		return fmt.Errorf("Service does not match the current ServiceBridge name")
+		// Skip reverting as  this step if the selectors don't match? Are we deleting a servicebridge that failed because a service already had another bridge attached?
+		return nil
 	}
 
 	originalSelectors := map[string]string{}
