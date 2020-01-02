@@ -1,0 +1,15 @@
+apiVersion: kips.faux.ninja/v1alpha1
+kind: ServiceBridge
+metadata:
+  name: servicebridge-sample
+spec:
+  targetService: # This is the service that we're redirecting and routing to the remote (dev) machine
+    name: your-service
+    ports:
+    - name: port-name
+      remotePort:  9000
+  additionalServices: # These are services that we want the remote machine to be able to forward to
+    - name: another-service
+      ports:
+        - name: another-service-port
+          remotePort: 9001
