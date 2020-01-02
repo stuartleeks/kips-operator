@@ -487,7 +487,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 		// TODO - test multiple ports bound to single relay name
 		// TODO - allow relay name(s) to be set in ServiceBridge spec
 		clusterConfigData += "\n" +
-			"  - RelayName: " + service.Name + "\n" +
+			"  - RelayName: " + serviceBridge.Spec.TargetService.RelayName + "\n" +
 			"    BindAddress: 0.0.0.0\n" +
 			"    BindPort: " + portString + "\n" +
 			"    PortName: port" + portString + "\n"
@@ -495,7 +495,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 		// TODO - allow HostPort(s) to be set in ServiceBridge spec
 		// TODO - allow Host to be set in spec
 		remoteConfigData += "\n" +
-			"  - RelayName: " + service.Name + "\n" +
+			"  - RelayName: " + serviceBridge.Spec.TargetService.RelayName + "\n" +
 			"    HostPort: " + fmt.Sprintf("%d", targetPort.RemotePort) + "\n" +
 			"    Host: localhost\n" +
 			"    PortName: port" + portString + "\n"
@@ -521,7 +521,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 				// TODO - allow HostPort(s) to be set in ServiceBridge spec
 				// TODO - allow Host to be set in spec
 				clusterConfigData += "\n" +
-					"  - RelayName: " + service.Name + "\n" +
+					"  - RelayName: " + additionalService.RelayName + "\n" +
 					"    HostPort: " + portString + "\n" +
 					"    Host: " + service.Name + "\n" +
 					"    PortName: port" + portString + "\n"
@@ -529,7 +529,7 @@ func (r *ServiceBridgeReconciler) getAzBridgeConfig(serviceBridge kipsv1alpha1.S
 				// TODO - test multiple ports bound to single relay name
 				// TODO - allow relay name(s) to be set in ServiceBridge spec
 				remoteConfigData += "\n" +
-					"  - RelayName: " + service.Name + "\n" +
+					"  - RelayName: " + additionalService.RelayName + "\n" +
 					"    BindAddress: localhost\n" + // TODO - do we need to be able to customize this?
 					"    BindPort: " + fmt.Sprintf("%d", targetPort.RemotePort) + "\n" +
 					"    HostName: " + service.Name + "\n" +

@@ -37,53 +37,77 @@ spec:
           description: ServiceBridgeSpec defines the desired state of ServiceBridge
           properties:
             additionalServices:
+              description: AdditionalServices are the services to redirect from the
+                remote connection
               items:
                 description: AdditionalService holds the configuration for services
                   that we want the remote machine to be able to forward to
                 properties:
                   name:
+                    description: Name of the service to redirect from the remote connection
                     type: string
                   ports:
+                    description: Ports is a collection of ports to redirect
                     items:
                       description: AdditionalServicePort holds the configuration for
                         a port on an AdditionalService
                       properties:
                         name:
+                          description: Name is the name of the service to redirect
+                            from the remote connection
                           type: string
                         remotePort:
+                          description: RemotePort is the port to use on the remote
+                            machine to route traffic to this service
                           type: integer
                       required:
                       - name
                       - remotePort
                       type: object
                     type: array
+                  relayName:
+                    description: RelayName is the name of the Azure Relay to connect
+                      via
+                    type: string
                 required:
                 - name
                 - ports
+                - relayName
                 type: object
               type: array
             targetService:
-              description: TargetService represents a service targeted by the ServiceBridge
+              description: TargetService is the service to redirect to the remote
+                connection
               properties:
                 name:
+                  description: Name is the name of the service to redirect to the
+                    remote connection
                   type: string
                 ports:
+                  description: Ports is a collection of ports to redirect
                   items:
                     description: TargetServicePort holds the configuration for a targeted
                       port on a service
                     properties:
                       name:
+                        description: Name of the targeted port
                         type: string
                       remotePort:
+                        description: RemotePort is the remote port to forward to
                         type: integer
                     required:
                     - name
                     - remotePort
                     type: object
                   type: array
+                relayName:
+                  description: RelayName is the name of the Azure Relay to connect
+                    via
+                  type: string
               required:
               - name
               - ports
+              - relayName
               type: object
           required:
           - additionalServices
@@ -93,13 +117,12 @@ spec:
           description: ServiceBridgeStatus defines the observed state of ServiceBridge
           properties:
             clientAzbridgeConfig:
-              type: string
-            message:
+              description: ClientAzbridgeConfig contains the Azbridge config to use
+                on the remote connection
               type: string
             state:
-              description: ServiceBridgeState represents the state of the ServiceBridge
-              type: string
-            temp:
+              description: State gives a high level indication of the ServiceBridge
+                state
               type: string
           type: object
       type: object

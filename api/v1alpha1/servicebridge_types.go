@@ -12,32 +12,46 @@ type ServiceBridgeSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	TargetService      TargetService       `json:"targetService"`
+	// TargetService is the service to redirect to the remote connection
+	TargetService TargetService `json:"targetService"`
+	// AdditionalServices are the services to redirect from the remote connection
 	AdditionalServices []AdditionalService `json:"additionalServices"`
 }
 
 // TargetService represents a service targeted by the ServiceBridge
 type TargetService struct {
-	Name  string              `json:"name"`
+	// Name is the name of the service to redirect to the remote connection
+	Name string `json:"name"`
+	// RelayName is the name of the Azure Relay to connect via
+	RelayName string `json:"relayName"`
+	// Ports is a collection of ports to redirect
 	Ports []TargetServicePort `json:"ports"`
 }
 
 // TargetServicePort holds the configuration for a targeted port on a service
 type TargetServicePort struct {
-	Name       string `json:"name"`       // Name of the targeted port
-	RemotePort int    `json:"remotePort"` // Remote port to forward to
+	// Name of the targeted port
+	Name string `json:"name"`
+	// RemotePort is the remote port to forward to
+	RemotePort int `json:"remotePort"`
 }
 
 // AdditionalService holds the configuration for services that we want the remote machine to be able to forward to
 type AdditionalService struct {
-	Name  string                  `json:"name"`
+	// Name of the service to redirect from the remote connection
+	Name string `json:"name"`
+	// RelayName is the name of the Azure Relay to connect via
+	RelayName string `json:"relayName"`
+	// Ports is a collection of ports to redirect
 	Ports []AdditionalServicePort `json:"ports"`
 }
 
 // AdditionalServicePort holds the configuration for a port on an AdditionalService
 type AdditionalServicePort struct {
-	Name       string `json:"name"`       // Name of the targeted port
-	RemotePort int    `json:"remotePort"` // Port to use on the remote machine to route traffic to this service
+	// Name is the name of the service to redirect from the remote connection
+	Name string `json:"name"` // Name of the targeted port
+	// RemotePort is the port to use on the remote machine to route traffic to this service
+	RemotePort int `json:"remotePort"`
 	// TODO - allow referencing additional services across namespaces
 }
 
@@ -46,10 +60,10 @@ type ServiceBridgeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	State                *ServiceBridgeState `json:"state,omitempty"`
-	Message              *string             `json:"message,omitempty"`
-	Temp                 *string             `json:"temp,omitempty"`
-	ClientAzbridgeConfig *string             `json:"clientAzbridgeConfig,omitempty"`
+	// State gives a high level indication of the ServiceBridge state
+	State *ServiceBridgeState `json:"state,omitempty"`
+	// ClientAzbridgeConfig contains the Azbridge config to use on the remote connection
+	ClientAzbridgeConfig *string `json:"clientAzbridgeConfig,omitempty"`
 }
 
 // ServiceBridgeState represents the state of the ServiceBridge

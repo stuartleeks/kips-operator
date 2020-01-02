@@ -19,6 +19,7 @@ This walkthrough assumes that you have
 - have installed `azbridge` on your local machine
 - an Azure Relay created
 - have set the `AZBRIDGE_RELAY_CONNSTR` to the connection string for your Azure Relay
+- have two Hybrid Connections created in Azure Relay called `relay1` and `relay2`
 
 ## Setting up the initial deployment
 
@@ -90,6 +91,7 @@ metadata:
 spec:
   targetService: # This is the service that we're redirecting and routing to the remote (dev) machine
     name: api
+    relayName: relay1
     ports:
     - name: api
       remotePort:  9000
@@ -167,6 +169,7 @@ metadata:
 spec:
   targetService: # This is the service that we're redirecting and routing to the remote (dev) machine
     name: web
+    relayName: relay1
     ports:
     - name: http
       remotePort: 9001
@@ -174,6 +177,7 @@ spec:
     - name: api
       ports:
         - name: api
+          relayName: relay2
           remotePort: 9100
 ```
 

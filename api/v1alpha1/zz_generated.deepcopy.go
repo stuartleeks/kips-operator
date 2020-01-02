@@ -133,16 +133,6 @@ func (in *ServiceBridgeStatus) DeepCopyInto(out *ServiceBridgeStatus) {
 		*out = new(ServiceBridgeState)
 		**out = **in
 	}
-	if in.Message != nil {
-		in, out := &in.Message, &out.Message
-		*out = new(string)
-		**out = **in
-	}
-	if in.Temp != nil {
-		in, out := &in.Temp, &out.Temp
-		*out = new(string)
-		**out = **in
-	}
 	if in.ClientAzbridgeConfig != nil {
 		in, out := &in.ClientAzbridgeConfig, &out.ClientAzbridgeConfig
 		*out = new(string)
