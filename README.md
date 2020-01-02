@@ -82,25 +82,17 @@ In the first goal traffic was only routed from the cluster to a remote machine (
 
 ## Installing
 
-TODO
+### Deploying the operator into the cluster
 
 * deploying operator (CRDs, operator, config/secrets)
 
-## TODO
+TODO
 
-* set up devcontainer
-* Docs
-  * installation of operator
-  * client setup
-  * walkthrough with kips-sample-app (i.e. how to achieve each of the examples in the goals)
-* Test multiple ports for a service
-* Script/util for running local side
-  * set up host names? (add hostnames to the status to read from client?)
-  * handle namespace as an arg
-  * dump out info
-  * ~~grab config from servicebridge status~~
-  * ~~run azbridge~~
-  * clean up host names?
-* Allow additionalServices to reference across namespaces
-* Check kips pod status and reflect in service bridge status
-* review error handling (add back-off and retry limit). Also review when errors are returned vs just requeuing (check logs).
+### Running the operator locally
+
+TODO
+
+### Setting up azbridge
+
+TODO
+
