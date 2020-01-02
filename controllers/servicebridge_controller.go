@@ -212,34 +212,6 @@ func (r *ServiceBridgeReconciler) tearDownKipsAndRemoveFinalizer(ctx context.Con
 
 		// our finalizer is present, so lets handle any external dependencies
 
-		// delete the config map
-		configMap := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: serviceBridge.Namespace,
-				Name:      serviceBridge.Name,
-			},
-		}
-
-		if err := r.Delete(ctx, configMap); err != nil {
-			if !apierrs.IsNotFound(err) { // ignore not found - we wanted to delete it anyway!
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleteFailed", fmt.Sprintf("Failed to delete ConfigMap: %s", err))
-				return err
-			}
-		} else {
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapDeleted", "Deleted ConfigMap")
-		}
-
-		// delete the deployment
-		deployment := r.getDeployment(*serviceBridge, "NOT_SET_DELETING")
-		if err := r.Delete(ctx, deployment); err != nil {
-			if !apierrs.IsNotFound(err) { // ignore not found - we wanted to delete it anyway!
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleteFailed", fmt.Sprintf("Failed to delete Deployment: %s", err))
-				return err
-			}
-		} else {
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentDeleted", "Deleted Deployment")
-		}
-
 		// revert service info once other resources are cleaned up
 		if err := r.revertServiceSelectors(ctx, log, serviceBridge); err != nil {
 			// if fail to delete the external dependency here, return with error
@@ -342,8 +314,6 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 
 func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, referencedServices *ReferencedServices) (*ctrl.Result, string, error) {
 
-	// TODO - set owner reference?
-
 	config, err := r.getAzBridgeConfig(*serviceBridge, referencedServices)
 	if err != nil {
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
@@ -354,6 +324,9 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredConfigMap.Namespace, Name: desiredConfigMap.Name}, configMap); err != nil {
 		if !apierrs.IsNotFound(err) {
+			return &ctrl.Result{}, "", err
+		}
+		if err = ctrl.SetControllerReference(serviceBridge, desiredConfigMap, r.Scheme); err != nil {
 			return &ctrl.Result{}, "", err
 		}
 		if err := r.Create(ctx, desiredConfigMap); err != nil {
@@ -395,12 +368,13 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 
 func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr.Logger, serviceBridge *kipsv1alpha1.ServiceBridge, configHash string) (*ctrl.Result, error) {
 
-	// TODO - set owner reference?
-
 	desiredDeployment := r.getDeployment(*serviceBridge, configHash)
 	deployment := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: desiredDeployment.Namespace, Name: desiredDeployment.Name}, deployment); err != nil {
 		if !apierrs.IsNotFound(err) {
+			return &ctrl.Result{}, err
+		}
+		if err = ctrl.SetControllerReference(serviceBridge, desiredDeployment, r.Scheme); err != nil {
 			return &ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredDeployment); err != nil {
