@@ -1,1 +1,0 @@
-dotnet azbridge.dll --config-file /azbridge-config/config.yaml -v -x $AZURE_BRIDGE_CONNECTIONSTRING
