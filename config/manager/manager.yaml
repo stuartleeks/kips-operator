@@ -27,7 +27,7 @@ spec:
         - /manager
         args:
         - --enable-leader-election
-        image: controller:latest
+        image: stuartleeks/kips-operator:latest
         name: manager
         resources:
           limits:
