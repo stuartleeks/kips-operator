@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= kips-operator:latest
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 
@@ -32,6 +32,10 @@ debug: generate fmt checks manifests
 install: manifests
 	kustomize build config/crd | kubectl apply -f -
 
+## Generate release YAML for installing CRDs (todo move to GitHub Release eventually)
+release-install: manifests
+	kustomize build config/crd > deploy/crds.yaml
+
 # Uninstall CRDs from a cluster
 uninstall: manifests
 	kustomize build config/crd | kubectl delete -f -
@@ -40,6 +44,13 @@ uninstall: manifests
 deploy: manifests
 	cd config/manager && kustomize edit set image controller=${IMG}
 	kustomize build config/default | kubectl apply -f -
+
+## Generate release YAML for installing operator (todo move to GitHub Release eventually)
+release-deploy: manifests
+	kustomize build config/default > deploy/deploy.yaml
+
+## Generate release YAML (todo move to GitHub Release eventually)
+release: release-install release-deploy
 
 # Generate manifests e.g. CRD, RBAC etc.
 manifests: controller-gen
