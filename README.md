@@ -112,5 +112,8 @@ TODO
 
 ### Setting up azbridge
 
-TODO
+You will need `azbridge` installed locally to connect to the `ServiceBridge`. See <https://github.com/Azure/azure-relay-bridge#downloads> for installation instructions.
 
+## Getting started
+
+See the [kips-sample-app Walkthrough](samples/kips-sample-app/README.md) for a guide to getting started with kips-operator.
