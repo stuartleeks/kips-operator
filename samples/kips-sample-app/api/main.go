@@ -22,7 +22,7 @@ func main() {
 
 	address := os.Getenv("SERVE_ADDRESS")
 	if address == "" {
-		address = ":9000"
+		address = "0.0.0.0:9000"
 	}
 	fmt.Printf("Starting server on '%s' ...\n", address)
 	err := http.ListenAndServe(address, nil)
