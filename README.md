@@ -82,6 +82,24 @@ In the first goal traffic was only routed from the cluster to a remote machine (
 
 ## Installing
 
+### Creating an Azure Relay
+
+The `ServiceBridge` builds on `azbridge` which uses [Azure Relay](https://docs.microsoft.com/en-us/azure/service-bus-relay/relay-what-is-it) for connectivity.
+
+After creating an Azure Relay, go to the "Shared access policies" section and grab the "Connection String".
+
+Create a `AZBRIDGE_RELAY_CONNSTR` environment variable with the connection string for use by the client script:
+
+```bash
+export AZBRIDGE_RELAY_CONNSTR=Endpoint="sb://examplerelay.servicebus.windows.net/;SharedAccessKeyName=YourKeyName;SharedAccessKey=***MASKED***"
+```
+
+Next, create the secret for use by the operator:
+
+```bash
+kubectl create secret generic azbridge-connection-string --from-literal=connectionString=$AZBRIDGE_RELAY_CONNSTR
+```
+
 ### Deploying the operator into the cluster
 
 * deploying operator (CRDs, operator, config/secrets)
