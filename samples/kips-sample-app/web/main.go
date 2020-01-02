@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 var apiAddress = ""
@@ -15,8 +16,9 @@ var rootTemplate *template.Template
 
 // RootContext is the context passed to the HTML template
 type RootContext struct {
-	WebValue string // Value configured for Web app (via WEB_VALUE env var)
-	APIValue string // Value read from the API
+	WebValue     string // Value configured for Web app (via WEB_VALUE env var)
+	APIValue     string // Value read from the API
+	RenderedTime string
 }
 
 func main() {
@@ -51,8 +53,9 @@ func main() {
 
 func serveRoot(w http.ResponseWriter, r *http.Request) {
 	context := RootContext{
-		WebValue: webValue,
-		APIValue: getAPIValue(),
+		WebValue:     webValue,
+		APIValue:     getAPIValue(),
+		RenderedTime: time.Now().UTC().Format("2006-01-02T15:04:05.999"),
 	}
 	log.Printf("Serving response: WebValue=%s;ApiValue=%s\n", context.WebValue, context.APIValue)
 	rootTemplate.Execute(w, context)
