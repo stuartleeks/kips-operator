@@ -102,13 +102,17 @@ kubectl create secret generic azbridge-connection-string --from-literal=connecti
 
 ### Deploying the operator into the cluster
 
-* deploying operator (CRDs, operator, config/secrets)
+Either clone the repo or download the `deploy` folder.
 
-TODO
+* `kubectl apply deploy/crds.yaml` to deploy the CRDs
+* `kubectl apply deploy/deploy.yaml` to deploy the operator
 
-### Running the operator locally
+### Running the operator locally from source
 
-TODO
+Assuming you have the required tools (Go, kustomize etc) installed:
+
+* `make install` will install the CRDs
+* `make run` will build and run the operator locally
 
 ### Setting up azbridge
 
