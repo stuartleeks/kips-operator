@@ -12,5 +12,5 @@ spec:
     - name: api
       ports:
         - name: api
-          remotePort: 9000
+          remotePort: 9100
   
