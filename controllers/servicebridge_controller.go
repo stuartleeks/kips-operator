@@ -103,15 +103,27 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	// add a finalizer to revert the selectors on the Service: https://book.kubebuilder.io/reference/using-finalizers.html?highlight=delete#using-finalizers
-	if err := r.ensureFinalizerPresent(ctx, log, serviceBridge); err != nil {
+	err := r.ensureFinalizerPresent(ctx, log, serviceBridge)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	referencedServices, err := r.getReferencedServices(ctx, serviceBridge)
 	if err != nil {
-		log.Error(err, "unable to fetch service")
+		log.Info(fmt.Sprintf("Unable to fetch services: %s", err))
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceResolverError", err.Error())
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil // TODO - backoff, max attempts, ...?
+		backOff, err := r.getBackoffDuration(ctx, serviceBridge, "getReferencedServices")
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if backOff == nil {
+			// Reached maximum number of attempts
+			log.Info("Reached retry limit getting services")
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceResolverError-Final", "Reached retry limit getting services")
+			return ctrl.Result{}, nil
+		}
+		log.Info("Requeuing to retry", "backoff", backOff)
+		return ctrl.Result{RequeueAfter: *backOff}, nil
 	}
 
 	if serviceBridge.Status.State == nil {
@@ -636,6 +648,30 @@ func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *k
 		return r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge))
 	}
 	return nil
+}
+
+func (r *ServiceBridgeReconciler) getBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string) (*time.Duration, error) {
+
+	newBridge := serviceBridge.DeepCopy()
+	if serviceBridge.Status.ErrorState != nil && serviceBridge.Status.ErrorState.Stage == stage {
+		// Have a previous error state for the matching stage
+		if newBridge.Status.ErrorState.LastBackOffPeriodInSeconds > 512 {
+			return nil, nil
+		}
+		newBridge.Status.ErrorState.LastBackOffPeriodInSeconds = newBridge.Status.ErrorState.LastBackOffPeriodInSeconds * 2
+	} else {
+		newBridge.Status.ErrorState = &kipsv1alpha1.ErrorState{
+			Stage:                      stage,
+			LastBackOffPeriodInSeconds: 1,
+		}
+	}
+
+	if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
+		return nil, err
+	}
+
+	duration := time.Duration(newBridge.Status.ErrorState.LastBackOffPeriodInSeconds) * time.Second
+	return &duration, nil
 }
 
 // SetupWithManager sets up the controller

@@ -64,6 +64,14 @@ type ServiceBridgeStatus struct {
 	State *ServiceBridgeState `json:"state,omitempty"`
 	// ClientAzbridgeConfig contains the Azbridge config to use on the remote connection
 	ClientAzbridgeConfig *string `json:"clientAzbridgeConfig,omitempty"`
+	//
+	ErrorState *ErrorState `json:"errorState,omitempty"`
+}
+
+// ErrorState is used to control error back-offs
+type ErrorState struct {
+	Stage                      string `json:"stage"`
+	LastBackOffPeriodInSeconds int    `json:"lastBackOffPeriodInSeconds"`
 }
 
 // ServiceBridgeState represents the state of the ServiceBridge
@@ -79,10 +87,10 @@ const (
 )
 
 // +kubebuilder:object:root=true
-// The line below is the key to updating the status without hitting "the server could not find the requested resource" - see https://github.com/kubernetes-sigs/kubebuilder/blob/a06ec9adbe2f3f4388399697f4cc30ed35fef2dd/docs/book/src/reference/generating-crd.md#status
-// +kubebuilder:subresource:status
+// The subresource line below is the key to updating the status without hitting "the server could not find the requested resource" - see https://github.com/kubernetes-sigs/kubebuilder/blob/a06ec9adbe2f3f4388399697f4cc30ed35fef2dd/docs/book/src/reference/generating-crd.md#status
 
 // ServiceBridge is the Schema for the servicebridges API
+// +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 type ServiceBridge struct {
 	metav1.TypeMeta   `json:",inline"`

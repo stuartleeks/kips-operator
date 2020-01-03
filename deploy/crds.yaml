@@ -118,6 +118,17 @@ spec:
               description: ClientAzbridgeConfig contains the Azbridge config to use
                 on the remote connection
               type: string
+            errorState:
+              description: ErrorState is used to control error back-offs
+              properties:
+                lastBackOffPeriodInSeconds:
+                  type: integer
+                stage:
+                  type: string
+              required:
+              - lastBackOffPeriodInSeconds
+              - stage
+              type: object
             state:
               description: State gives a high level indication of the ServiceBridge
                 state
