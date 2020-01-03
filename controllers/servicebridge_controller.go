@@ -36,6 +36,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kipsv1alpha1 "faux.ninja/kips-operator/api/v1alpha1"
 	utils "faux.ninja/kips-operator/utils"
@@ -88,10 +90,6 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 
 	serviceBridge := &kipsv1alpha1.ServiceBridge{}
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
-		if apierrs.IsNotFound(err) {
-			log.Info("unable to fetch ServiceBridge (NotFound) - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
-			return ctrl.Result{}, nil
-		}
 		log.Error(err, "unable to fetch ServiceBridge")
 		return ctrl.Result{}, err
 	}
@@ -645,5 +643,12 @@ func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.eventBroadcaster = mgr.GetEventRecorderFor("kips-operator")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
+		WithEventFilter(predicate.Funcs{
+			DeleteFunc: func(e event.DeleteEvent) bool {
+				// ServiceBridgeReconciler adds a finalizer so we perform clean-up when the delete timestamp is added
+				// Suppress Delete events to avoid filtering them out in the Reconcile function
+				return false
+			},
+		}).
 		Complete(r)
 }
