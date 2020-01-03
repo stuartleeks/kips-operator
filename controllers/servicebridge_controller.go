@@ -644,6 +644,14 @@ func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
 		WithEventFilter(predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				oldGeneration := e.MetaOld.GetGeneration()
+				newGeneration := e.MetaNew.GetGeneration()
+
+				// Generation is only updated on spec changes (also on deletion), not metadata or status
+				// Filter out events where the generation hasn't changed to avoid being triggered by status updates
+				return oldGeneration != newGeneration
+			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
 				// ServiceBridgeReconciler adds a finalizer so we perform clean-up when the delete timestamp is added
 				// Suppress Delete events to avoid filtering them out in the Reconcile function
