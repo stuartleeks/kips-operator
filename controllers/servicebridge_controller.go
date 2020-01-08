@@ -90,6 +90,10 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 
 	serviceBridge := &kipsv1alpha1.ServiceBridge{}
 	if err := r.Get(ctx, req.NamespacedName, serviceBridge); err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("unable to fetch ServiceBridge (NotFound) - it may have been deleted") // TODO - look at whether we can prevent entering the reconcile loop on deletion when item is deleted
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "unable to fetch ServiceBridge")
 		return ctrl.Result{}, err
 	}
@@ -108,22 +112,14 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 		return ctrl.Result{}, err
 	}
 
-	referencedServices, err := r.getReferencedServices(ctx, serviceBridge)
-	if err != nil {
-		log.Info(fmt.Sprintf("Unable to fetch services: %s", err))
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceResolverError", err.Error())
-		backOff, err := r.getBackoffDuration(ctx, serviceBridge, "getReferencedServices")
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if backOff == nil {
-			// Reached maximum number of attempts
-			log.Info("Reached retry limit getting services")
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceResolverError-Final", "Reached retry limit getting services")
-			return ctrl.Result{}, nil
-		}
-		log.Info("Requeuing to retry", "backoff", backOff)
-		return ctrl.Result{RequeueAfter: *backOff}, nil
+	var referencedServices *ReferencedServices
+	result, err := r.executeWithRetry(ctx, serviceBridge, "getReferencedServices", "ServiceResolverError", "getting Services", log, func() error {
+		var err error
+		referencedServices, err = r.getReferencedServices(ctx, serviceBridge)
+		return err
+	})
+	if result != nil || err != nil {
+		return *result, err
 	}
 
 	if serviceBridge.Status.State == nil {
@@ -650,13 +646,17 @@ func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *k
 	return nil
 }
 
-func (r *ServiceBridgeReconciler) getBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string) (*time.Duration, error) {
-
+// getBackoffDuration determines the back-off duration to use for the specified stage updating the status with the new values.
+// If error is nil then duration is -ve for maximum retries reached or +ve for the duration to use
+func (r *ServiceBridgeReconciler) getBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string) (time.Duration, error) {
+	const MaximumRetryDuration = 512
 	newBridge := serviceBridge.DeepCopy()
-	if serviceBridge.Status.ErrorState != nil && serviceBridge.Status.ErrorState.Stage == stage {
-		// Have a previous error state for the matching stage
-		if newBridge.Status.ErrorState.LastBackOffPeriodInSeconds > 512 {
-			return nil, nil
+	if serviceBridge.Status.ErrorState != nil &&
+		serviceBridge.Status.ErrorState.Stage == stage &&
+		serviceBridge.Status.ErrorState.SpecGeneration == serviceBridge.Generation {
+		// Have a previous error state for the matching stage and generation
+		if newBridge.Status.ErrorState.LastBackOffPeriodInSeconds > MaximumRetryDuration {
+			return -1 * time.Second, nil
 		}
 		newBridge.Status.ErrorState.LastBackOffPeriodInSeconds = newBridge.Status.ErrorState.LastBackOffPeriodInSeconds * 2
 	} else {
@@ -665,13 +665,52 @@ func (r *ServiceBridgeReconciler) getBackoffDuration(ctx context.Context, servic
 			LastBackOffPeriodInSeconds: 1,
 		}
 	}
+	newBridge.Status.ErrorState.SpecGeneration = serviceBridge.Generation
 
 	if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	duration := time.Duration(newBridge.Status.ErrorState.LastBackOffPeriodInSeconds) * time.Second
-	return &duration, nil
+	return duration, nil
+}
+func (r *ServiceBridgeReconciler) clearBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge) error {
+
+	if serviceBridge.Status.ErrorState != nil {
+		newBridge := serviceBridge.DeepCopy()
+		newBridge.Status.ErrorState = nil
+		if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (r *ServiceBridgeReconciler) executeWithRetry(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string, eventReason string, eventActionDescription string, log logr.Logger, action func() error) (*ctrl.Result, error) {
+
+	err := action()
+
+	if err == nil {
+		// Success
+		if err = r.clearBackoffDuration(ctx, serviceBridge); err != nil {
+			return &ctrl.Result{}, err
+		}
+	} else {
+		log.Info(fmt.Sprintf("Failed to execute %s: %s", stage, err))
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason, err.Error())
+		backOff, err := r.getBackoffDuration(ctx, serviceBridge, stage) // This updates the retry interval saved in the status
+		if err != nil {
+			return &ctrl.Result{}, err
+		}
+		if backOff < 0 {
+			// Reached maximum number of attempts
+			log.Info("Reached retry limit " + eventActionDescription)
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason+"-Final", "Reached retry limit "+eventActionDescription)
+			return &ctrl.Result{}, nil
+		}
+		log.Info("Requeuing to retry", "backoff", backOff)
+		return &ctrl.Result{RequeueAfter: backOff}, nil
+	}
+	return nil, nil
 }
 
 // SetupWithManager sets up the controller

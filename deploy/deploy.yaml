@@ -126,14 +126,24 @@ spec:
                 on the remote connection
               type: string
             errorState:
-              description: ErrorState is used to control error back-offs
+              description: ErrorState is used to manage back-off retries for errors
               properties:
                 lastBackOffPeriodInSeconds:
+                  description: LastBackOffPeriodInSeconds is the duration (in seconds)
+                    used for the last back-off
+                  type: integer
+                specGeneration:
+                  description: SpecGeneration is the Generation from the Spec for
+                    the last error
+                  format: int64
                   type: integer
                 stage:
+                  description: Stage is an identifier for the stage of reconciliation
+                    that the error occurred in
                   type: string
               required:
               - lastBackOffPeriodInSeconds
+              - specGeneration
               - stage
               type: object
             state:
