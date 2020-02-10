@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,10 +59,11 @@ type ReferencedServices struct {
 // ServiceBridgeReconciler reconciles a ServiceBridge object
 type ServiceBridgeReconciler struct {
 	client.Client
-	Log              logr.Logger
-	Scheme           *runtime.Scheme
-	counter          int
-	eventBroadcaster record.EventRecorder
+	Log           logr.Logger
+	Scheme        *runtime.Scheme
+	counter       int
+	eventRecorder record.EventRecorder
+	retryExecutor utils.RetryExecutor
 }
 
 const (
@@ -113,7 +113,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	var referencedServices *ReferencedServices
-	result, err := r.executeWithRetry(ctx, serviceBridge, "getReferencedServices", "ServiceResolver", log, func() error {
+	result, err := r.retryExecutor.ExecuteWithRetry(ctx, serviceBridge, "getReferencedServices", "ServiceResolver", func() error {
 		var err error
 		referencedServices, err = r.getReferencedServices(ctx, serviceBridge)
 		return err
@@ -240,7 +240,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 	serviceAppliedBridge := service.ObjectMeta.Annotations[annotationServiceServiceBridge]
 	if serviceAppliedBridge != "" {
 		if serviceAppliedBridge != serviceBridge.Name {
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ServiceAlreadyAttached", fmt.Sprintf("Service '%s' already attached to ServiceBridge '%s'", service.Name, serviceAppliedBridge))
+			r.eventRecorder.Event(serviceBridge, corev1.EventTypeWarning, "ServiceAlreadyAttached", fmt.Sprintf("Service '%s' already attached to ServiceBridge '%s'", service.Name, serviceAppliedBridge))
 			return &ctrl.Result{}, nil
 		}
 		return nil, nil // have already applied the service selector changes
@@ -268,7 +268,7 @@ func (r *ServiceBridgeReconciler) updateServiceSelectors(ctx context.Context, lo
 		return &ctrl.Result{}, err
 	}
 	log.V(1).Info("Updated Service metadata", "Service.ObjectMeta.ResourceVersion", service.ObjectMeta.ResourceVersion)
-	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataUpdated", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
+	r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataUpdated", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
 
 	return nil, nil
 }
@@ -318,7 +318,7 @@ func (r *ServiceBridgeReconciler) revertServiceSelectors(ctx context.Context, lo
 		log.Error(err, "unable to update Service metadata")
 		return err
 	}
-	r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
+	r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "ServiceMetadataReverted", fmt.Sprintf("Service metadata updated ('%s')", service.Name))
 
 	return nil
 }
@@ -327,7 +327,7 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 
 	config, err := r.getAzBridgeConfig(*serviceBridge, referencedServices)
 	if err != nil {
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
+		r.eventRecorder.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create desired config map: %s", err))
 		log.Error(err, "Failed to create desired configMap")
 		return &ctrl.Result{}, "", nil // don't pass the error as we don't want to requeue (TODO - revisit and requeue with back-off)
 	}
@@ -346,20 +346,20 @@ func (r *ServiceBridgeReconciler) ensureConfigMap(ctx context.Context, log logr.
 				log.V(1).Info("Creating config map failed - already exists. Requeuing")
 				return &ctrl.Result{Requeue: true}, "", nil
 			}
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create config map: %s", err))
+			r.eventRecorder.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create config map: %s", err))
 			log.Error(err, "Failed to create configMap")
 			return &ctrl.Result{}, "", nil
 		}
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapCreated", "Created ConfigMap")
+		r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapCreated", "Created ConfigMap")
 	} else {
 		if !reflect.DeepEqual(configMap.Data, desiredConfigMap.Data) {
 			configMap.Data = desiredConfigMap.Data
 			if err := r.Update(ctx, configMap); err != nil {
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapUpdateFailed", fmt.Sprintf("Failed to update config map: %s", err))
+				r.eventRecorder.Event(serviceBridge, corev1.EventTypeWarning, "ConfigMapUpdateFailed", fmt.Sprintf("Failed to update config map: %s", err))
 				log.Error(err, "Failed to update configMap")
 				return &ctrl.Result{}, "", err
 			}
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
+			r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "ConfigMapUpdated", "Updated ConfigMap")
 		}
 	}
 
@@ -394,12 +394,12 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 				log.V(1).Info("Creating deployment - already exists. Requeuing")
 				return &ctrl.Result{Requeue: true}, nil
 			}
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentCreateFailed", fmt.Sprintf("Failed to create deployment: %s", err))
+			r.eventRecorder.Event(serviceBridge, corev1.EventTypeWarning, "DeploymentCreateFailed", fmt.Sprintf("Failed to create deployment: %s", err))
 			log.Error(err, "Failed to create deployment")
 			return &ctrl.Result{}, nil
 		}
 		log.Info("Created deployment", "ConfigHash", configHash)
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentCreated", "Created Deployment")
+		r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentCreated", "Created Deployment")
 	} else {
 		// only thing that changes is the CONFIG_HASH value used to trigger updates when the config changes
 		currentHash := r.getConfigHashFor(deployment)
@@ -407,18 +407,18 @@ func (r *ServiceBridgeReconciler) ensureDeployment(ctx context.Context, log logr
 		if currentHash != desiredHash {
 			newDeployment := deployment.DeepCopy()
 			if err = r.setConfigHashFor(newDeployment, desiredHash); err != nil {
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update config hash")
+				r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update config hash")
 				log.Error(err, "Failed to update config hash")
 				return &ctrl.Result{}, nil
 			}
 			err := r.Patch(ctx, newDeployment, client.MergeFrom(deployment))
 			if err != nil {
-				r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update deployment")
+				r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdateFailed", "Failed to update deployment")
 				log.Error(err, "Failed to update deployment")
 				return &ctrl.Result{}, err
 			}
 			log.Info("Updated deployment", "ConfigHash", desiredHash)
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdated", "Updated Deployment")
+			r.eventRecorder.Event(serviceBridge, corev1.EventTypeNormal, "DeploymentUpdated", "Updated Deployment")
 		}
 	}
 
@@ -646,82 +646,10 @@ func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *k
 	return nil
 }
 
-// getBackoffDuration determines the back-off duration to use for the specified stage updating the status with the new values.
-// If error is nil then duration is -ve for maximum retries reached or +ve for the duration to use
-func (r *ServiceBridgeReconciler) getBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string) (time.Duration, error) {
-	const MaximumRetryDuration = 512
-	newBridge := serviceBridge.DeepCopy()
-	if serviceBridge.Status.ErrorState != nil &&
-		serviceBridge.Status.ErrorState.Stage == stage &&
-		serviceBridge.Status.ErrorState.SpecGeneration == serviceBridge.Generation {
-		// Have a previous error state for the matching stage and generation
-		if newBridge.Status.ErrorState.LastBackOffPeriodInSeconds > MaximumRetryDuration {
-			return -1 * time.Second, nil
-		}
-		newBridge.Status.ErrorState.LastBackOffPeriodInSeconds = newBridge.Status.ErrorState.LastBackOffPeriodInSeconds * 2
-	} else {
-		newBridge.Status.ErrorState = &kipsv1alpha1.ErrorState{
-			Stage:                      stage,
-			LastBackOffPeriodInSeconds: 1,
-		}
-	}
-	newBridge.Status.ErrorState.SpecGeneration = serviceBridge.Generation
-
-	if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
-		return 0, err
-	}
-
-	duration := time.Duration(newBridge.Status.ErrorState.LastBackOffPeriodInSeconds) * time.Second
-	return duration, nil
-}
-func (r *ServiceBridgeReconciler) clearBackoffDuration(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge) error {
-
-	if serviceBridge.Status.ErrorState != nil {
-		newBridge := serviceBridge.DeepCopy()
-		newBridge.Status.ErrorState = nil
-		if err := r.Status().Patch(ctx, newBridge, client.MergeFrom(serviceBridge)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *ServiceBridgeReconciler) executeWithRetry(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string, eventReason string, log logr.Logger, action func() error) (*ctrl.Result, error) {
-
-	err := action()
-
-	log = log.WithValues("stage", stage)
-
-	if err == nil {
-		// Success
-		log.Info("Successfully executed")
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason, "Success")
-
-		if err = r.clearBackoffDuration(ctx, serviceBridge); err != nil {
-			return &ctrl.Result{}, err
-		}
-	} else {
-		log.Info(fmt.Sprintf("Failed to execute: %s", err))
-		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason, err.Error())
-		backOff, err := r.getBackoffDuration(ctx, serviceBridge, stage) // This updates the retry interval saved in the status
-		if err != nil {
-			return &ctrl.Result{}, err
-		}
-		if backOff < 0 {
-			// Reached maximum number of attempts
-			log.Info("Reached retry limit")
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason+"-Final", "Reached retry limit")
-			return &ctrl.Result{}, nil
-		}
-		log.Info("Requeuing to retry", "backoff", backOff)
-		return &ctrl.Result{RequeueAfter: backOff}, nil
-	}
-	return nil, nil
-}
-
 // SetupWithManager sets up the controller
 func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.eventBroadcaster = mgr.GetEventRecorderFor("kips-operator")
+	r.eventRecorder = mgr.GetEventRecorderFor("kips-operator")
+	r.retryExecutor = utils.NewRetryExecutor(r.eventRecorder, r.Log, r)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
 		WithEventFilter(predicate.Funcs{
