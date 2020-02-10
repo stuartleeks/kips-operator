@@ -113,7 +113,7 @@ func (r *ServiceBridgeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, erro
 	}
 
 	var referencedServices *ReferencedServices
-	result, err := r.executeWithRetry(ctx, serviceBridge, "getReferencedServices", "ServiceResolverError", "getting Services", log, func() error {
+	result, err := r.executeWithRetry(ctx, serviceBridge, "getReferencedServices", "ServiceResolver", log, func() error {
 		var err error
 		referencedServices, err = r.getReferencedServices(ctx, serviceBridge)
 		return err
@@ -685,17 +685,23 @@ func (r *ServiceBridgeReconciler) clearBackoffDuration(ctx context.Context, serv
 	}
 	return nil
 }
-func (r *ServiceBridgeReconciler) executeWithRetry(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string, eventReason string, eventActionDescription string, log logr.Logger, action func() error) (*ctrl.Result, error) {
+
+func (r *ServiceBridgeReconciler) executeWithRetry(ctx context.Context, serviceBridge *kipsv1alpha1.ServiceBridge, stage string, eventReason string, log logr.Logger, action func() error) (*ctrl.Result, error) {
 
 	err := action()
 
+	log = log.WithValues("stage", stage)
+
 	if err == nil {
 		// Success
+		log.Info("Successfully executed")
+		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason, "Success")
+
 		if err = r.clearBackoffDuration(ctx, serviceBridge); err != nil {
 			return &ctrl.Result{}, err
 		}
 	} else {
-		log.Info(fmt.Sprintf("Failed to execute %s: %s", stage, err))
+		log.Info(fmt.Sprintf("Failed to execute: %s", err))
 		r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason, err.Error())
 		backOff, err := r.getBackoffDuration(ctx, serviceBridge, stage) // This updates the retry interval saved in the status
 		if err != nil {
@@ -703,8 +709,8 @@ func (r *ServiceBridgeReconciler) executeWithRetry(ctx context.Context, serviceB
 		}
 		if backOff < 0 {
 			// Reached maximum number of attempts
-			log.Info("Reached retry limit " + eventActionDescription)
-			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason+"-Final", "Reached retry limit "+eventActionDescription)
+			log.Info("Reached retry limit")
+			r.eventBroadcaster.Event(serviceBridge, corev1.EventTypeWarning, eventReason+"-Final", "Reached retry limit")
 			return &ctrl.Result{}, nil
 		}
 		log.Info("Requeuing to retry", "backoff", backOff)
