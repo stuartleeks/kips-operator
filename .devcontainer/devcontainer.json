@@ -17,7 +17,6 @@
 		"-v", "${env:HOME}${env:USERPROFILE}/.ssh:/root/.ssh",
 		// Mount azure and kubernetes auth
 		"-v", "${env:HOME}${env:USERPROFILE}/.azure:/root/.azure",
-		"-v", "${env:HOME}${env:USERPROFILE}/.gitconfig:/root/.gitconfig", // Required due to volume mount used for .vscode-server
 		"-v", "${env:HOME}${env:USERPROFILE}/.kube:/root/.kube"
 	],
 	"workspaceMount": "src=${localWorkspaceFolder},dst=/workspace,type=bind,consistency=delegated",
