@@ -4,11 +4,11 @@
 	"runArgs": [
 		"--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined",
 		// Mount go mod cache
-		"-v", "agentcontroller-gomodcache:/go/pkg",
-		// Cache vscode exentsions installs and homedir
-		"-v", "agentcontroller-vscodecache:/root/.vscode-server",
+		"-v", "kips-operator-gomodcache:/go/pkg",
+		// Cache vscode extensions installs and homedir
+		"-v", "kips-operator-vscodecache:/root/.vscode-server",
 		// Keep command history 
-		"-v", "agentcontroller-bashhistory:/root/commandhistory",
+		"-v", "kips-operator-bashhistory:/root/commandhistory",
 		// Mount docker socket for docker builds
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
 		// Use host network
@@ -58,11 +58,5 @@
 		"ms-vscode.go",
 		"redhat.vscode-yaml",
 		"ms-kubernetes-tools.vscode-kubernetes-tools",
-		"coenraads.bracket-pair-colorizer",
-		"mhutchie.git-graph",
-		"trentrand.git-rebase-shortcuts",
-		"ms-vsliveshare.vsliveshare",
-		"fabiospampinato.vscode-open-in-github",
-		"timonwong.shellcheck"
 	]
 }
