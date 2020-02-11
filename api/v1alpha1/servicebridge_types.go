@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"faux.ninja/kips-operator/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -65,17 +66,7 @@ type ServiceBridgeStatus struct {
 	// ClientAzbridgeConfig contains the Azbridge config to use on the remote connection
 	ClientAzbridgeConfig *string `json:"clientAzbridgeConfig,omitempty"`
 	// ErrorState is used to manage back-off retries for errors
-	ErrorState *ErrorState `json:"errorState,omitempty"`
-}
-
-// ErrorState is used to control error back-offs
-type ErrorState struct {
-	// Stage is an identifier for the stage of reconciliation that the error occurred in
-	Stage string `json:"stage"`
-	// LastBackOffPeriodInSeconds is the duration (in seconds) used for the last back-off
-	LastBackOffPeriodInSeconds int `json:"lastBackOffPeriodInSeconds"`
-	// SpecGeneration is the Generation from the Spec for the last error
-	SpecGeneration int64 `json:"specGeneration"`
+	ErrorState *utils.ErrorState `json:"errorState,omitempty"`
 }
 
 // ServiceBridgeState represents the state of the ServiceBridge
@@ -102,6 +93,26 @@ type ServiceBridge struct {
 
 	Spec   ServiceBridgeSpec   `json:"spec,omitempty"`
 	Status ServiceBridgeStatus `json:"status,omitempty"`
+}
+
+var _ utils.ObjectWithErrorState = &ServiceBridge{}
+
+// GetErrorState implements ObjectWithErrorState
+func (s *ServiceBridge) GetErrorState() *utils.ErrorState {
+	return s.Status.ErrorState
+}
+
+// SetErrorState implements ObjectWithErrorState
+func (s *ServiceBridge) SetErrorState(errorState *utils.ErrorState) {
+	s.Status.ErrorState = errorState
+}
+
+// DeepCopyObjectWithErrorState implements ObjectWithErrorState
+func (s *ServiceBridge) DeepCopyObjectWithErrorState() utils.ObjectWithErrorState {
+	if c := s.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
 }
 
 // +kubebuilder:object:root=true
