@@ -39,7 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kipsv1alpha1 "faux.ninja/kips-operator/api/v1alpha1"
-	utils "faux.ninja/kips-operator/utils"
+	"faux.ninja/kips-operator/pkg/retry"
+	"faux.ninja/kips-operator/pkg/utils"
 
 	"k8s.io/client-go/tools/record"
 )
@@ -63,7 +64,7 @@ type ServiceBridgeReconciler struct {
 	Scheme        *runtime.Scheme
 	counter       int
 	eventRecorder record.EventRecorder
-	retryExecutor utils.RetryExecutor
+	retryExecutor retry.Executor
 }
 
 const (
@@ -649,7 +650,7 @@ func (r *ServiceBridgeReconciler) setState(ctx context.Context, serviceBridge *k
 // SetupWithManager sets up the controller
 func (r *ServiceBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.eventRecorder = mgr.GetEventRecorderFor("kips-operator")
-	r.retryExecutor = utils.NewRetryExecutor(r.eventRecorder, r.Log, r)
+	r.retryExecutor = retry.NewExecutor(r.eventRecorder, r.Log, r)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kipsv1alpha1.ServiceBridge{}).
 		WithEventFilter(predicate.Funcs{

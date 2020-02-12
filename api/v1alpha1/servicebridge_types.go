@@ -1,7 +1,7 @@
 package v1alpha1
 
 import (
-	"faux.ninja/kips-operator/utils"
+	"faux.ninja/kips-operator/pkg/retry"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -66,7 +66,7 @@ type ServiceBridgeStatus struct {
 	// ClientAzbridgeConfig contains the Azbridge config to use on the remote connection
 	ClientAzbridgeConfig *string `json:"clientAzbridgeConfig,omitempty"`
 	// ErrorState is used to manage back-off retries for errors
-	ErrorState *utils.ErrorState `json:"errorState,omitempty"`
+	ErrorState *retry.ErrorState `json:"errorState,omitempty"`
 }
 
 // ServiceBridgeState represents the state of the ServiceBridge
@@ -95,20 +95,20 @@ type ServiceBridge struct {
 	Status ServiceBridgeStatus `json:"status,omitempty"`
 }
 
-var _ utils.ObjectWithErrorState = &ServiceBridge{}
+var _ retry.ObjectWithErrorState = &ServiceBridge{}
 
 // GetErrorState implements ObjectWithErrorState
-func (s *ServiceBridge) GetErrorState() *utils.ErrorState {
+func (s *ServiceBridge) GetErrorState() *retry.ErrorState {
 	return s.Status.ErrorState
 }
 
 // SetErrorState implements ObjectWithErrorState
-func (s *ServiceBridge) SetErrorState(errorState *utils.ErrorState) {
+func (s *ServiceBridge) SetErrorState(errorState *retry.ErrorState) {
 	s.Status.ErrorState = errorState
 }
 
 // DeepCopyObjectWithErrorState implements ObjectWithErrorState
-func (s *ServiceBridge) DeepCopyObjectWithErrorState() utils.ObjectWithErrorState {
+func (s *ServiceBridge) DeepCopyObjectWithErrorState() retry.ObjectWithErrorState {
 	if c := s.DeepCopy(); c != nil {
 		return c
 	}

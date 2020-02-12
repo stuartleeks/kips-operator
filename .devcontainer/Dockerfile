@@ -72,5 +72,4 @@ ENV PATH="/usr/local/kubebuilder/bin:${PATH}"
 ENV PATH="/root/.kubectx:${PATH}"
 
 # Set Kubeconfig path to kind cluster
-ENV KUBECONFIG="/root/.kube/kind-config-psccontroller"
 ENV KUBE_EDITOR="nano"
