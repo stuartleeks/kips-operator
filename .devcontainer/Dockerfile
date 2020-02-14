@@ -67,6 +67,9 @@ RUN bash -f ./configbash.sh
 # Install golangci-linter
 RUN curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b $(go env GOPATH)/bin v1.21.0
 
+# Install ginkgo
+RUN go get github.com/onsi/ginkgo/ginkgo@v1.11.0
+
 # Build the path
 ENV PATH="/usr/local/kubebuilder/bin:${PATH}"
 ENV PATH="/root/.kubectx:${PATH}"
