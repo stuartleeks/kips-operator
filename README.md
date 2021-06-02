@@ -8,7 +8,8 @@ BE AWARE: This project is best considered as a sample. I created it as a pet pro
 
 There are **many** approaches for doing similar things including those listed below. (Note that this list is not exhaustive, nor an endorsement of items!)
 
-* Azure Dev Spaces - https://docs.microsoft.com/en-us/azure/dev-spaces/
+* Bridge to Kubernetes: https://docs.microsoft.com/en-us/visualstudio/containers/overview-bridge-to-kubernetes?view=vs-2019
+* ~~Azure Dev Spaces - https://docs.microsoft.com/en-us/azure/dev-spaces/~~
 * https://www.telepresence.io/
 * https://ngrok.com/
 * https://github.com/inlets/inlets
